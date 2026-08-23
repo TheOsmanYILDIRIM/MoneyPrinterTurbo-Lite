@@ -119,6 +119,13 @@
 
     <!-- GALERİ -->
     <section id="tab-history" class="card hidden">
+        <div class="flex-row" style="justify-content:space-between; align-items:center; margin-bottom:14px; padding-bottom:10px; border-bottom:1px solid rgba(255,255,255,0.08); flex-wrap:wrap; gap:8px;">
+            <div class="section-title" style="margin:0; font-size:1.05rem;">📁 Video Galerisi</div>
+            <div class="flex-row" style="gap:8px;">
+                <button class="btn-sm" id="btn-cancel-all" style="background:#f59e0b22; color:#fbbf24; border:1px solid #f59e0b44; cursor:pointer;" title="Kuyruktaki ve çalışan tüm görevleri durdurur">⏹️ Tümünü İptal Et</button>
+                <button class="btn-sm" id="btn-delete-all" style="background:#ef444422; color:#f87171; border:1px solid #ef444444; cursor:pointer;" title="Tüm görevleri ve üretilen videoları siler">🗑️ Tümünü Sil</button>
+            </div>
+        </div>
         <div id="tasks-container">
             <div class="empty-state">Yükleniyor...</div>
         </div>
@@ -273,6 +280,25 @@
                 </select>
             </div>
         </div>
+
+        <div class="grid-2 mt6">
+            <div>
+                <label for="prod_highlight_color">Kelime Vurgu Rengi</label>
+                <select id="prod_highlight_color">
+                    <option value="#FFD700" selected>🟡 Altın Sarısı (#FFD700)</option>
+                    <option value="#FFFF00">⚡ Neon Sarı (#FFFF00)</option>
+                    <option value="#FF3366">💖 Parlak Pembe (#FF3366)</option>
+                    <option value="#38BDF8">🔵 Canlı Açık Mavi (#38BDF8)</option>
+                    <option value="#4ADE80">🟢 Neon Yeşil (#4ADE80)</option>
+                    <option value="#FB923C">🟠 Canlı Turuncu (#FB923C)</option>
+                </select>
+            </div>
+            <div>
+                <label for="prod_highlight_words">Otomatik Vurgulanacak Kelimeler (Opsiyonel)</label>
+                <input type="text" id="prod_highlight_words" placeholder="Örn: önemli, dikkat, kpss, formül">
+            </div>
+        </div>
+        <p class="hint" style="margin-top:6px;">💡 <b>Kelime Vurgulama:</b> Script/JSON içinde <code>**kelime**</code> veya <code>&lt;hl&gt;kelime&lt;/hl&gt;</code> veya <code>&lt;color=#FFD700&gt;kelime&lt;/color&gt;</code> veya <code>&lt;size=28&gt;kelime&lt;/size&gt;</code> kullanarak belirli kelimeleri renkli veya büyük yapabilirsiniz.</p>
 
         <div class="section-title">🎵 Müzik</div>
         <div class="grid-2">

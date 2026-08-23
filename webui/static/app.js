@@ -448,6 +448,37 @@ async function cancelTask(taskId) {
     } catch (e) { alert(e.message); }
 }
 
+async function cancelAllTasks() {
+    if (!confirm("Kuyruktaki ve çalışan TÜM görevler iptal edilsin mi?")) return;
+    const btn = el("btn-cancel-all");
+    if (btn) btn.disabled = true;
+    try {
+        const data = await api("/api/tasks/cancel-all", { method: "POST" });
+        alert(`⏹️ ${data.count || 0} görev iptal edildi.`);
+        loadTasks();
+    } catch (e) {
+        alert("Hata: " + e.message);
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+async function deleteAllTasks() {
+    if (!confirm("⚠️ DİKKAT: Galerideki TÜM görevler ve videolar kalıcı olarak silinecek!\n\nOnaylıyor musunuz?")) return;
+    const btn = el("btn-delete-all");
+    if (btn) btn.disabled = true;
+    try {
+        const data = await api("/api/tasks/delete-all", { method: "POST" });
+        alert(`🗑️ ${data.count || 0} görev ve video silindi.`);
+        loadTasks();
+    } catch (e) {
+        alert("Hata: " + e.message);
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+
 /* ---------------- varyant (ses / görüntü / altyazı) menüsü ---------------- */
 
 let openMenuEl = null;
@@ -860,6 +891,8 @@ function applyProductionSettings(s) {
     set("sub_pos", s.prod_sub_pos);
     set("sub_size", s.prod_sub_size);
     set("sub_box", String(s.prod_sub_box) === "true" ? "true" : "false");
+    set("prod_highlight_color", s.prod_highlight_color);
+    set("prod_highlight_words", s.prod_highlight_words);
     set("bgm_source", s.prod_bgm_mode);
     set("bgm_volume", s.prod_bgm_volume);
     set("prod_transition", s.prod_transition);
@@ -889,6 +922,8 @@ async function saveSettings() {
         prod_sub_pos: el("sub_pos").value,
         prod_sub_size: parseInt(el("sub_size").value || "18", 10),
         prod_sub_box: el("sub_box").value === "true",
+        prod_highlight_color: el("prod_highlight_color") ? el("prod_highlight_color").value : "#FFD700",
+        prod_highlight_words: el("prod_highlight_words") ? el("prod_highlight_words").value.trim() : "",
         prod_bgm_mode: el("bgm_source").value,
         prod_bgm_volume: parseFloat(el("bgm_volume").value || "0.15"),
         prod_transition: el("prod_transition").value,
@@ -968,6 +1003,10 @@ function bindEvents() {
     el("btn-save-settings").addEventListener("click", saveSettings);
     el("btn-tunnel-start").addEventListener("click", startTunnel);
     el("btn-upload-songs").addEventListener("click", uploadSongs);
+    const bCancelAll = el("btn-cancel-all");
+    if (bCancelAll) bCancelAll.addEventListener("click", cancelAllTasks);
+    const bDeleteAll = el("btn-delete-all");
+    if (bDeleteAll) bDeleteAll.addEventListener("click", deleteAllTasks);
     el("btn-ai-generate").addEventListener("click", aiGenerateScript);
     el("btn-json-fill").addEventListener("click", fillFormFromJson);
     const bFill = el("btn-batch-example-fill");

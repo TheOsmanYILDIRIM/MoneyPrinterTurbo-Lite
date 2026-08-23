@@ -80,6 +80,25 @@ def cancel_task(task_id: str) -> bool:
     return False
 
 
+def cancel_all() -> int:
+    """Tüm aktif (kuyrukta veya işlenen) görevleri iptal eder."""
+    tasks = task_store.get_all_tasks()
+    cancelled_count = 0
+    for t in tasks:
+        tid = t.get("task_id")
+        if t.get("state") in ("queued", "processing"):
+            if cancel_task(tid):
+                cancelled_count += 1
+    return cancelled_count
+
+
+def cancel_and_delete_all() -> int:
+    """Önce tüm görevleri iptal eder sonra veritabanı ve dosyalardan temizler."""
+    cancel_all()
+    return task_store.delete_all_tasks()
+
+
+
 def _run_task(task_id: str):
     task = task_store.get_task(task_id)
     if not task:
@@ -143,6 +162,9 @@ def _run_task(task_id: str):
             sub_bold=bool(task.get("sub_bold", True)),
             sub_font=task.get("sub_font", "Roboto"),
             outline_color=task.get("outline_color", "#000000"),
+            highlight_words=task.get("highlight_words"),
+            highlight_color=task.get("highlight_color"),
+            highlight_size=task.get("highlight_size"),
             bgm_path=task.get("bgm_path"),
             bgm_mode=task.get("bgm_mode", "none"),
             bgm_volume=float(task.get("bgm_volume") or 0.15),

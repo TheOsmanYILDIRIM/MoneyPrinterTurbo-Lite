@@ -64,6 +64,7 @@ def sanitize_filename(name: str) -> str:
 def parse_multipart(body: bytes, boundary: bytes):
     fields = {}
     files = {}
+    file_list = []
     for part in body.split(b"--" + boundary):
         if not part or part in (b"--\r\n", b"--", b"--\r\n\r\n"):
             continue
@@ -80,10 +81,12 @@ def parse_multipart(body: bytes, boundary: bytes):
         if name_match:
             name = name_match.group(1)
             if filename_match is not None:
-                files[name] = {"filename": filename_match.group(1), "content": content}
+                file_obj = {"name": name, "filename": filename_match.group(1), "content": content}
+                files[name] = file_obj
+                file_list.append(file_obj)
             else:
                 fields[name] = content.decode("utf-8", errors="ignore")
-    return fields, files
+    return fields, files, file_list
 
 
 def save_upload(data: dict, kind: str) -> str:
@@ -132,6 +135,10 @@ def extract_task_params(fields: dict, files: dict) -> tuple[dict, str | None, st
     sub_font = str(_val("sub_font", "prod_sub_font", "Roboto")).strip() or "Roboto"
     outline_color = str(_val("outline_color", "prod_outline_color", "#000000")).strip() or "#000000"
     subtitle_enabled = str(_val("subtitle_enabled", "prod_subtitle_enabled", "true")).lower() in ("true", "1", "yes")
+    highlight_color = str(_val("highlight_color", "prod_highlight_color", "#FFD700")).strip() or "#FFD700"
+    highlight_words = fields.get("highlight_words") or fields.get("sub_highlight_words") or prod.get("prod_highlight_words", "")
+    raw_hl_size = fields.get("highlight_size") or fields.get("sub_highlight_size")
+    highlight_size = int(raw_hl_size) if raw_hl_size else None
     bgm_source = fields.get("bgm_source") or prod.get("prod_bgm_mode", "none")
     bgm_volume = max(0.0, min(1.0, float(_val("bgm_volume", "prod_bgm_volume", 0.15) or 0.15)))
     transition = str(_val("transition", "prod_transition", "none")) or "none"
@@ -155,6 +162,9 @@ def extract_task_params(fields: dict, files: dict) -> tuple[dict, str | None, st
         "sub_bold": sub_bold,
         "sub_font": sub_font,
         "outline_color": outline_color,
+        "highlight_words": highlight_words,
+        "highlight_color": highlight_color,
+        "highlight_size": highlight_size,
         "bgm_mode": "random" if bgm_source == "random" else "none",
         "bgm_volume": bgm_volume,
         "transition": transition,
@@ -434,6 +444,14 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 logger.warning(f"LLM script üretimi hatası: {e}")
                 return self.send_json({"error": str(e)[:300]}, 400)
 
+        if path == "/api/tasks/cancel-all":
+            cancelled = worker.cancel_all()
+            return self.send_json({"success": True, "count": cancelled})
+
+        if path == "/api/tasks/delete-all":
+            deleted = worker.cancel_and_delete_all()
+            return self.send_json({"success": True, "count": deleted})
+
         m = re.match(r"^/api/tasks/([\w\-]+)/resume$", path)
         if m:
             task_id = m.group(1)
@@ -460,6 +478,9 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         if not self._guard():
             return
         path = urlparse(self.path).path.rstrip("/")
+        if path in ("/api/tasks", "/api/tasks/all"):
+            deleted = worker.cancel_and_delete_all()
+            return self.send_json({"success": True, "count": deleted})
         m = re.match(r"^/api/tasks/([\w\-]+)$", path)
         if m:
             ok = task_store.delete_task(m.group(1))
@@ -491,11 +512,11 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             boundary = content_type.split("boundary=", 1)[1].split(";")[0].strip().encode()
             return parse_multipart(body, boundary)
         data = json.loads(body.decode("utf-8")) if body else {}
-        return {k: str(v) for k, v in data.items()}, {}
+        return {k: str(v) for k, v in data.items()}, {}, []
 
     def _handle_generate(self):
         try:
-            fields, files = self._parse_request()
+            fields, files, _ = self._parse_request()
         except Exception as e:
             return self.send_json({"error": f"İstek okunamadı: {e}"}, 400)
 
@@ -512,7 +533,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
 
     def _handle_batch(self):
         try:
-            fields, files = self._parse_request()
+            fields, files, _ = self._parse_request()
         except Exception as e:
             return self.send_json({"error": f"İstek okunamadı: {e}"}, 400)
 
@@ -544,6 +565,9 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             sub_bold=str(fields.get("sub_bold") or prod.get("prod_sub_bold", "true")).lower() in ("true", "1", "yes"),
             sub_font=str(fields.get("sub_font") or prod.get("prod_sub_font", "Roboto")).strip() or "Roboto",
             outline_color=str(fields.get("outline_color") or prod.get("prod_outline_color", "#000000")).strip() or "#000000",
+            highlight_words=fields.get("highlight_words") or prod.get("prod_highlight_words", ""),
+            highlight_color=fields.get("highlight_color") or prod.get("prod_highlight_color", "#FFD700"),
+            highlight_size=int(fields.get("highlight_size")) if fields.get("highlight_size") else None,
             bgm_mode="random" if (fields.get("bgm_source") or prod.get("prod_bgm_mode", "none")) == "random" else "none",
             transition=fields.get("transition") or prod.get("prod_transition", "none"),
             transition_dur=float(fields.get("transition_dur") or prod.get("prod_transition_dur", 0.5)),
@@ -664,12 +688,12 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
     def _handle_song_upload(self):
         """Multipart gonderiyi resource/songs/ icine kaydeder (coklu dosya destekli)."""
         try:
-            _, files = self._parse_request()
+            _, _, file_list = self._parse_request()
         except Exception as e:
             return self.send_json({"error": f"Yükleme okunamadı: {e}"}, 400)
 
         saved, skipped = [], []
-        for item in files.values():
+        for item in file_list:
             name = sanitize_filename(item.get("filename", ""))
             base, ext = os.path.splitext(name)
             if ext.lower() not in BGM_EXTENSIONS:

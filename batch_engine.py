@@ -15,6 +15,8 @@ KEYWORD_PREFIXES = (
     "etiketler:", "etiket:", "terms:", "tags:"
 )
 TITLE_PREFIXES = ("başlık:", "ders:", "konu:", "title:")
+HIGHLIGHT_PREFIXES = ("highlight:", "vurgu:", "highlight_words:", "vurgulanan:", "vurgu_kelimeleri:")
+COLOR_PREFIXES = ("highlight_color:", "vurgu_renk:", "renk:")
 
 
 def parse_batch_text(content: str) -> List[Dict[str, str]]:
@@ -24,6 +26,7 @@ def parse_batch_text(content: str) -> List[Dict[str, str]]:
     Desteklenen format:
         # 1. Ders: Üslü Sayılar
         Keywords: math study blackboard
+        Vurgu: tabanlar, toplanır, üsler
         Üslü sayılarda tabanlar aynı iken üsler toplanır...
         ---
         # 2. Ders: Kurtuluş Savaşı
@@ -40,6 +43,8 @@ def parse_batch_text(content: str) -> List[Dict[str, str]]:
 
         subject = f"Ders {idx}"
         pexels_query = ""
+        highlight_words = ""
+        highlight_color = ""
         script_lines = []
 
         for line in lines:
@@ -55,16 +60,31 @@ def parse_batch_text(content: str) -> List[Dict[str, str]]:
                     if low.startswith(p):
                         pexels_query = line[len(p):].strip()
                         break
+            elif any(low.startswith(p) for p in HIGHLIGHT_PREFIXES):
+                for p in HIGHLIGHT_PREFIXES:
+                    if low.startswith(p):
+                        highlight_words = line[len(p):].strip()
+                        break
+            elif any(low.startswith(p) for p in COLOR_PREFIXES):
+                for p in COLOR_PREFIXES:
+                    if low.startswith(p):
+                        highlight_color = line[len(p):].strip()
+                        break
             else:
                 script_lines.append(line)
 
         script = " ".join(script_lines).strip()
         if script:
-            items.append({
+            item_dict = {
                 "subject": subject,
                 "script": script,
                 "pexels_query": pexels_query or subject
-            })
+            }
+            if highlight_words:
+                item_dict["highlight_words"] = highlight_words
+            if highlight_color:
+                item_dict["highlight_color"] = highlight_color
+            items.append(item_dict)
 
     return items
 
@@ -83,7 +103,10 @@ def _normalize_item(item: Dict[str, str]) -> Dict[str, str]:
         "script": str(low.get("script") or low.get("video_script")
                       or low.get("text") or "").strip(),
         "pexels_query": str(low.get("pexels_query") or low.get("video_terms")
-                            or low.get("keywords") or low.get("terms") or "").strip()
+                            or low.get("keywords") or low.get("terms") or "").strip(),
+        "highlight_words": low.get("highlight_words") or low.get("highlight") or low.get("vurgu") or low.get("vurgulanan") or "",
+        "highlight_color": low.get("highlight_color") or low.get("vurgu_renk") or "",
+        "highlight_size": low.get("highlight_size") or ""
     }
 
 
@@ -150,6 +173,9 @@ def create_batch_tasks(items: List[Dict[str, str]],
                        sub_bold: bool = True,
                        sub_font: str = "Roboto",
                        outline_color: str = "#000000",
+                       highlight_words: Optional[any] = None,
+                       highlight_color: Optional[str] = None,
+                       highlight_size: Optional[int] = None,
                        bgm_mode: str = "none",
                        transition: str = "none",
                        transition_dur: float = 0.5) -> List[str]:
@@ -159,18 +185,22 @@ def create_batch_tasks(items: List[Dict[str, str]],
     logger.info(f"Toplu üretim: {total} görev kuyruğa alınıyor...")
 
     for i, item in enumerate(items, 1):
-        item = _normalize_item(item)
+        norm = _normalize_item(item)
+        item_hl_words = norm.get("highlight_words") or highlight_words
+        item_hl_color = norm.get("highlight_color") or highlight_color
+        item_hl_size = int(norm.get("highlight_size")) if norm.get("highlight_size") else highlight_size
+
         task_id = task_store.create_task(
             task_id=uuid.uuid4().hex,
-            subject=item.get("subject") or f"Ders {i}",
-            script=item.get("script", ""),
-            voice=item.get("voice", voice),
-            aspect=item.get("aspect", aspect),
-            resolution=item.get("resolution", resolution),
-            bg_style=item.get("bg_style", bg_style),
-            pexels_query=item.get("pexels_query", ""),
-            voice_rate=float(item.get("voice_rate", voice_rate)),
-            voice_volume=float(item.get("voice_volume", voice_volume)),
+            subject=norm.get("subject") or f"Ders {i}",
+            script=norm.get("script", ""),
+            voice=norm.get("voice", voice),
+            aspect=norm.get("aspect", aspect),
+            resolution=norm.get("resolution", resolution),
+            bg_style=norm.get("bg_style", bg_style),
+            pexels_query=norm.get("pexels_query", ""),
+            voice_rate=float(norm.get("voice_rate", voice_rate)),
+            voice_volume=float(norm.get("voice_volume", voice_volume)),
             subtitle_enabled=subtitle_enabled,
             sub_color=sub_color,
             sub_pos=sub_pos,
@@ -179,6 +209,9 @@ def create_batch_tasks(items: List[Dict[str, str]],
             sub_bold=sub_bold,
             sub_font=sub_font,
             outline_color=outline_color,
+            highlight_words=item_hl_words,
+            highlight_color=item_hl_color,
+            highlight_size=item_hl_size,
             bgm_mode=bgm_mode,
             transition=transition,
             transition_dur=transition_dur,

@@ -142,12 +142,147 @@ def hex_to_ass_color(hex_str: str, alpha_hex: str = "00") -> str:
     return "&H00FFFFFF"
 
 
+def strip_formatting_tags(text: str) -> str:
+    """TTS için metindeki tüm altyazı/vurgu etiketlerini ve markdown işaretlerini temizler."""
+    if not text:
+        return ""
+    # HTML/XML etiketleri: <color=...>, </color>, <hl...>, </hl>, <size=...>, vb.
+    s = re.sub(r"<[^>]+>", "", text)
+    # Markdown bold/italic: **kelime**, __kelime__, *kelime*, _kelime_
+    s = re.sub(r"\*\*([^*]+)\*\*", r"\1", s)
+    s = re.sub(r"__([^_]+)__", r"\1", s)
+    # ASS inline tagleri: {\c&H...&}, {\fs...}, vb.
+    s = re.sub(r"\{[^\}]+\}", "", s)
+    # Boşlukları düzenle
+    s = re.sub(r"[ \t]+", " ", s).strip()
+    return s
+
+
+def extract_highlighted_words_from_text(text: str) -> List[str]:
+    """Metin içerisindeki **vurgu**, <hl>vurgu</hl>, <color>vurgu</color> kelimelerini çıkarır."""
+    if not text:
+        return []
+    words = []
+    # Markdown **...**
+    for m in re.findall(r"\*\*([^*]+)\*\*", text):
+        for w in m.strip().split():
+            clean = w.strip(".,!?;:()[]'\" \t")
+            if len(clean) > 1:
+                words.append(clean)
+    # <hl>...</hl>, <mark>...</mark>, <vurgu>...</vurgu>
+    for m in re.findall(r"<(?:hl|mark|vurgu)[^>]*>([^<]+)</(?:hl|mark|vurgu)>", text, re.IGNORECASE):
+        for w in m.strip().split():
+            clean = w.strip(".,!?;:()[]'\" \t")
+            if len(clean) > 1:
+                words.append(clean)
+    # <color=...>...</color>
+    for m in re.findall(r"<(?:color|c)=[^>]+>([^<]+)</(?:color|c)>", text, re.IGNORECASE):
+        for w in m.strip().split():
+            clean = w.strip(".,!?;:()[]'\" \t")
+            if len(clean) > 1:
+                words.append(clean)
+    # <size=...>...</size>
+    for m in re.findall(r"<(?:size|s)=[^>]+>([^<]+)</(?:size|s)>", text, re.IGNORECASE):
+        for w in m.strip().split():
+            clean = w.strip(".,!?;:()[]'\" \t")
+            if len(clean) > 1:
+                words.append(clean)
+    return list(dict.fromkeys(words))
+
+
+def format_ass_styled_text(
+    text: str,
+    base_fontsize: int,
+    base_color_ass: str,
+    highlight_words: Optional[any] = None,
+    highlight_color_hex: str = "#FFD700",
+    highlight_size: Optional[int] = None
+) -> str:
+    """Altyazı metnindeki vurgulu kelimeleri veya etiketleri ASS biçimlendirme kodlarına çevirir."""
+    if not text:
+        return ""
+
+    hl_ass = hex_to_ass_color(highlight_color_hex or "#FFD700", "00")
+    hl_fs = int(highlight_size) if highlight_size else max(base_fontsize + 4, int(round(base_fontsize * 1.15)))
+
+    res = text.replace("\n", " ").strip()
+
+    # 1. Custom <color=#HEX>...</color> or <c=#HEX>...</c>
+    def _replace_color(m):
+        col = m.group(1).strip()
+        body = m.group(2)
+        c_ass = hex_to_ass_color(col, "00")
+        return f"{{\\c{c_ass}}}{body}{{\\c{base_color_ass}}}"
+
+    res = re.sub(r"<(?:color|c)=['\"]?([#a-zA-Z0-9]+)['\"]?>([^<]+)</(?:color|c)>", _replace_color, res, flags=re.IGNORECASE)
+
+    # 2. Custom <size=NUM>...</size> or <s=NUM>...</s>
+    def _replace_size(m):
+        raw_sz = m.group(1).strip()
+        body = m.group(2)
+        try:
+            if raw_sz.startswith(("+", "-")):
+                sz = max(10, base_fontsize + int(raw_sz))
+            elif raw_sz.endswith(("x", "X")):
+                sz = max(10, int(round(base_fontsize * float(raw_sz[:-1]))))
+            else:
+                sz = max(10, int(raw_sz))
+        except Exception:
+            sz = hl_fs
+        return f"{{\\fs{sz}}}{body}{{\\fs{base_fontsize}}}"
+
+    res = re.sub(r"<(?:size|s)=['\"]?([+\-0-9.xX]+)['\"]?>([^<]+)</(?:size|s)>", _replace_size, res, flags=re.IGNORECASE)
+
+    # 3. <hl color="..." size="...">...</hl>
+    def _replace_hl_tag(m):
+        attrs = m.group(1) or ""
+        body = m.group(2)
+        c_match = re.search(r"color=['\"]?([#a-zA-Z0-9]+)['\"]?", attrs, re.IGNORECASE)
+        s_match = re.search(r"size=['\"]?([+\-0-9.xX]+)['\"]?", attrs, re.IGNORECASE)
+        c_ass = hex_to_ass_color(c_match.group(1), "00") if c_match else hl_ass
+        if s_match:
+            raw_sz = s_match.group(1)
+            try:
+                sz = max(10, base_fontsize + int(raw_sz)) if raw_sz.startswith(("+", "-")) else max(10, int(raw_sz))
+            except Exception:
+                sz = hl_fs
+        else:
+            sz = hl_fs
+        return f"{{\\c{c_ass}\\fs{sz}\\b1}}{body}{{\\c{base_color_ass}\\fs{base_fontsize}\\b0}}"
+
+    res = re.sub(r"<(?:hl|mark|vurgu)([^>]*)>([^<]+)</(?:hl|mark|vurgu)>", _replace_hl_tag, res, flags=re.IGNORECASE)
+
+    # 4. Markdown bold **kelime** -> highlight with highlight color & bold
+    res = re.sub(r"\*\*([^*]+)\*\*", rf"{{\\c{hl_ass}\\fs{hl_fs}\\b1}}\1{{\\c{base_color_ass}\\fs{base_fontsize}\\b0}}", res)
+
+    # 5. highlight_words eşleşmesi
+    hl_list = []
+    if highlight_words:
+        if isinstance(highlight_words, str):
+            hl_list = [w.strip() for w in re.split(r"[,;|\n]+", highlight_words) if w.strip()]
+        elif isinstance(highlight_words, (list, tuple, set)):
+            hl_list = [str(w).strip() for w in highlight_words if str(w).strip()]
+
+    if hl_list:
+        for hw in hl_list:
+            if not hw or len(hw) < 2:
+                continue
+            # Regex ile kelime sınırında bul (ASS tagleri içine düşmemek için)
+            pattern = re.compile(rf"(?<!\{{\\)(?<!\w)({re.escape(hw)})(?!\w)(?![^\{{]*\}})", re.IGNORECASE)
+            res = pattern.sub(rf"{{\\c{hl_ass}\\fs{hl_fs}\\b1}}\1{{\\c{base_color_ass}\\fs{base_fontsize}\\b0}}", res)
+
+    return res
+
+
 def write_ass_subtitles(cues: List[Tuple[float, float, str]], path: str,
                         width: int, height: int, sub_color: str = "#FFFFFF",
                         sub_pos: str = "bottom", sub_size: int = 18,
                         boxed: bool = False, is_bold: bool = True,
                         font_name: str = "Roboto", outline_color: str = "#000000",
-                        outline_width: Optional[int] = None) -> str:
+                        outline_width: Optional[int] = None,
+                        highlight_words: Optional[any] = None,
+                        highlight_color: str = "#FFD700",
+                        highlight_size: Optional[int] = None) -> str:
     """Video çözünürlüğüne (720p..4K) tam oturan zengin özelleştirmeli .ass altyazı üretir."""
     m = compute_subtitle_metrics(width, height, sub_size, boxed)
 
@@ -187,10 +322,18 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     lines = [header]
     for start, end, text in cues:
-        text = text.replace("\n", " ").strip()
-        if not text:
+        raw_text = text.replace("\n", " ").strip()
+        if not raw_text:
             continue
-        lines.append(f"Dialogue: 0,{format_ass_time(start)},{format_ass_time(end)},Sub,,0,0,0,,{text}\n")
+        styled_text = format_ass_styled_text(
+            raw_text,
+            base_fontsize=m["fontsize"],
+            base_color_ass=primary,
+            highlight_words=highlight_words,
+            highlight_color_hex=highlight_color or "#FFD700",
+            highlight_size=highlight_size
+        )
+        lines.append(f"Dialogue: 0,{format_ass_time(start)},{format_ass_time(end)},Sub,,0,0,0,,{styled_text}\n")
     
     with open(path, "w", encoding="utf-8") as f:
         f.writelines(lines)
@@ -508,7 +651,8 @@ async def generate_speech_edge(
     rate_str = f"{int((rate - 1.0) * 100):+d}%"
     vol_str = f"{int((volume - 1.0) * 100):+d}%"
 
-    communicate = edge_tts.Communicate(text, voice, rate=rate_str, volume=vol_str)
+    clean_text = strip_formatting_tags(text)
+    communicate = edge_tts.Communicate(clean_text, voice, rate=rate_str, volume=vol_str)
     submaker = edge_tts.SubMaker()
 
     with open(output_path, "wb") as f:
@@ -529,7 +673,7 @@ async def generate_speech_edge(
     # Cues boşsa süreye göre tahmini böl
     if not raw_cues:
         total_dur = get_audio_duration(output_path)
-        words = text.split()
+        words = clean_text.split()
         if words:
             w_dur = total_dur / len(words)
             for i, w in enumerate(words):
@@ -760,6 +904,9 @@ def build_lecture_video(
     sub_bold: bool = True,
     sub_font: str = "Roboto",
     outline_color: str = "#000000",
+    highlight_words: Optional[any] = None,
+    highlight_color: Optional[str] = None,
+    highlight_size: Optional[int] = None,
     bgm_path: Optional[str] = None,
     bgm_mode: str = "none",
     bgm_volume: float = 0.15,
@@ -824,11 +971,24 @@ def build_lecture_video(
     # 2. Altyazı (.ass)
     if subtitle_enabled and cues:
         notify(35, "Altyazılar senkronize ediliyor...")
+        auto_hl_words = extract_highlighted_words_from_text(script)
+        all_hl_words = []
+        if highlight_words:
+            if isinstance(highlight_words, str):
+                all_hl_words.extend([w.strip() for w in re.split(r"[,;|\n]+", highlight_words) if w.strip()])
+            elif isinstance(highlight_words, (list, tuple, set)):
+                all_hl_words.extend([str(w).strip() for w in highlight_words if str(w).strip()])
+        all_hl_words.extend(auto_hl_words)
+        all_hl_words = list(dict.fromkeys(all_hl_words))
+
         write_ass_subtitles(
             cues, subtitle_path, w, h,
             sub_color=sub_color, sub_pos=sub_pos, sub_size=sub_size,
             boxed=sub_box, is_bold=sub_bold, font_name=sub_font,
-            outline_color=outline_color
+            outline_color=outline_color,
+            highlight_words=all_hl_words,
+            highlight_color=highlight_color or "#FFD700",
+            highlight_size=highlight_size
         )
 
     # 3. Arka Plan Materyali

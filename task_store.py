@@ -51,6 +51,9 @@ def create_task(task_id: str, subject: str = "Ders", script: str = "", voice: st
                 transition_dur: float = 0.5,
                 batch_index: Optional[int] = None,
                 batch_total: Optional[int] = None,
+                highlight_words: Optional[any] = None,
+                highlight_color: Optional[str] = None,
+                highlight_size: Optional[int] = None,
                 **kwargs) -> dict:
     tasks = _load_db()
     task = {
@@ -74,6 +77,9 @@ def create_task(task_id: str, subject: str = "Ders", script: str = "", voice: st
         "sub_bold": sub_bold,
         "sub_font": sub_font,
         "outline_color": outline_color,
+        "highlight_words": highlight_words,
+        "highlight_color": highlight_color,
+        "highlight_size": highlight_size,
         "custom_bg_media": custom_bg_media,
         "custom_audio": custom_audio,
         "bgm_path": bgm_path,
@@ -92,6 +98,7 @@ def create_task(task_id: str, subject: str = "Ders", script: str = "", voice: st
         "error": None,
         "logs": []
     }
+    task.update(kwargs)
     tasks[task_id] = task
     _save_db(tasks)
     return task
@@ -180,3 +187,33 @@ def delete_task(task_id: str) -> bool:
         except Exception:
             pass
     return True
+
+
+def delete_all_tasks() -> int:
+    """Galerideki ve veritabanındaki tüm görevleri ve dosyalarını siler."""
+    with _lock:
+        tasks = _load_db()
+        count = len(tasks)
+        task_ids = list(tasks.keys())
+        for tid in task_ids:
+            task_data = tasks.pop(tid, {})
+            file_path = task_data.get("file_path")
+            if file_path and os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except Exception:
+                    pass
+            task_dir = os.path.join(BASE_DIR, "storage", "tasks", tid)
+            if os.path.isdir(task_dir):
+                try:
+                    for fname in os.listdir(task_dir):
+                        try:
+                            os.remove(os.path.join(task_dir, fname))
+                        except Exception:
+                            pass
+                    os.rmdir(task_dir)
+                except Exception:
+                    pass
+        _save_db(tasks)
+        return count
+

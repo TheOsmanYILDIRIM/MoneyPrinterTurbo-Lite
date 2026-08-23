@@ -42,6 +42,8 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "prod_sub_pos": "bottom",
     "prod_sub_size": 18,
     "prod_sub_box": False,
+    "prod_highlight_color": "#FFD700",
+    "prod_highlight_words": "",
     "prod_bgm_mode": "none",
     "prod_bgm_volume": 0.15,
     "prod_transition": "none",
