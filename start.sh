@@ -2,7 +2,7 @@
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BASE_DIR="${BASE_DIR:-$DIR}"
-PYTHON_BIN="${PYTHON_BIN:-$(which python || which python3)}"
+PYTHON_BIN="${PYTHON_BIN:-$(command -v python || command -v python3 || echo /data/data/com.termux/files/usr/bin/python)}"
 
 cd "$BASE_DIR" || exit 1
 mkdir -p "$BASE_DIR/storage"
