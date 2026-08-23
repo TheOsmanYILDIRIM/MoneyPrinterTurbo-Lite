@@ -405,7 +405,7 @@ def _download_pexels_clip(url: str, output_path: str, w: int, h: int, timeout: i
         # Hedef çözünürlüğe ölçekle
         cmd = [
             "ffmpeg", "-y", "-i", tmp_path,
-            "-vf", f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1",
+            "-vf", f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1,fps=30,format=yuv420p",
             "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-an",
             output_path
         ]
@@ -455,25 +455,39 @@ def select_best_pexels_file(video_files: list, target_w: int, target_h: int) -> 
 
 
 def fetch_pexels_clips(query: str, orientation: str = "portrait", outdir: str = ".",
-                       w: int = 720, h: int = 1280, max_clips: int = 6) -> List[str]:
-    """Çoklu sahne arama terimleri varsa her biri için ayrı video arar ve indirir.
-    Böylece tüm video boyunca tek bir klip yerine sahneler değiştikçe zengin videolar kullanılır.
-    """
+                       w: int = 720, h: int = 1280, max_clips: int = 6,
+                       target_duration: float = 25.0,
+                       script: str = "") -> List[str]:
+    """Hedef video süresine ve sahne içeriğine göre gereken sayıda benzersiz stok video arar ve indirir."""
     api_key = settings_manager.get_setting("pexels_api_keys", "").split(",")[0].strip()
     if not api_key:
         logger.warning("Pexels API anahtarı tanımlı değil (Ayarlar'dan ekleyin)")
         return []
 
+    # Her sahne klibi için ideal süre 4-6 saniye
+    needed_clips = max(2, min(max_clips, max(2, int(round(target_duration / 5.0)))))
+    
     terms = extract_search_terms(query)
+    
+    # Terim sayısı azsa metinden ek anahtar kelimeler türet
+    if len(terms) < needed_clips and script:
+        clean_s = strip_formatting_tags(script)
+        sentences = [s.strip() for s in re.split(r"[.!?\n]+", clean_s) if len(s.strip()) > 5]
+        for st in sentences:
+            if len(terms) >= needed_clips:
+                break
+            st_clean = clean_search_term(st)
+            if st_clean and st_clean not in terms:
+                terms.append(st_clean)
+
     headers = {"Authorization": api_key}
     clips: List[str] = []
     seen_ids = set()
+    total_downloaded_dur = 0.0
 
-    # Sahne başına düşen klip sayısı
-    clips_per_term = max(1, max_clips // len(terms)) if len(terms) > 1 else max_clips
-
+    # Her terim için 1 benzersiz video indir
     for term in terms:
-        if len(clips) >= max_clips:
+        if len(clips) >= needed_clips and total_downloaded_dur >= target_duration:
             break
         search_q = " ".join(term.split()[:4])
         url = f"https://api.pexels.com/videos/search?query={requests.utils.quote(search_q)}&per_page=8&orientation={orientation}"
@@ -483,7 +497,6 @@ def fetch_pexels_clips(query: str, orientation: str = "portrait", outdir: str = 
             if not videos:
                 continue
 
-            term_added = 0
             for video in videos:
                 vid_id = video.get("id")
                 if vid_id in seen_ids:
@@ -498,34 +511,51 @@ def fetch_pexels_clips(query: str, orientation: str = "portrait", outdir: str = 
                 out_path = os.path.join(outdir, f"pexels_{len(clips)}.mp4")
                 if _download_pexels_clip(best_url, out_path, w, h):
                     clips.append(out_path)
-                    term_added += 1
-                    if term_added >= clips_per_term or len(clips) >= max_clips:
-                        break
+                    try:
+                        c_dur = get_audio_duration(out_path)
+                    except Exception:
+                        c_dur = 5.0
+                    total_downloaded_dur += c_dur
+                    break
         except Exception as e:
             logger.warning(f"Pexels terim '{search_q}' hatası: {e}")
 
-    # Hiç klip bulunamadıysa genel fallback terimleri dene
-    if not clips:
-        fallback_terms = ["study library", "blackboard education", "office work", "nature landscape", "abstract background"]
-        fb_q = random.choice(fallback_terms)
-        fb_url = f"https://api.pexels.com/videos/search?query={requests.utils.quote(fb_q)}&per_page=6&orientation={orientation}"
-        try:
-            r_fb = requests.get(fb_url, headers=headers, timeout=8)
-            videos = r_fb.json().get("videos", []) if r_fb.status_code == 200 else []
-            for video in videos:
-                if len(clips) >= max_clips:
-                    break
-                video_files = video.get("video_files", [])
-                best_url = select_best_pexels_file(video_files, w, h)
-                if best_url:
-                    out_path = os.path.join(outdir, f"pexels_{len(clips)}.mp4")
-                    if _download_pexels_clip(best_url, out_path, w, h):
-                        clips.append(out_path)
-        except Exception as e:
-            logger.warning(f"Pexels fallback hatası: {e}")
+    # Eksik kaldıysa fallback terimlerle tamamla
+    if len(clips) < needed_clips or total_downloaded_dur < target_duration * 0.8:
+        fallback_terms = [
+            "study library desk", "blackboard classroom", "office workspace",
+            "nature landscape drone", "reading law books", "abstract digital motion"
+        ]
+        random.shuffle(fallback_terms)
+        for fb_q in fallback_terms:
+            if len(clips) >= needed_clips and total_downloaded_dur >= target_duration:
+                break
+            fb_url = f"https://api.pexels.com/videos/search?query={requests.utils.quote(fb_q)}&per_page=6&orientation={orientation}"
+            try:
+                r_fb = requests.get(fb_url, headers=headers, timeout=8)
+                videos = r_fb.json().get("videos", []) if r_fb.status_code == 200 else []
+                for video in videos:
+                    vid_id = video.get("id")
+                    if vid_id in seen_ids:
+                        continue
+                    seen_ids.add(vid_id)
+                    video_files = video.get("video_files", [])
+                    best_url = select_best_pexels_file(video_files, w, h)
+                    if best_url:
+                        out_path = os.path.join(outdir, f"pexels_{len(clips)}.mp4")
+                        if _download_pexels_clip(best_url, out_path, w, h):
+                            clips.append(out_path)
+                            try:
+                                c_dur = get_audio_duration(out_path)
+                            except Exception:
+                                c_dur = 5.0
+                            total_downloaded_dur += c_dur
+                            break
+            except Exception as e:
+                logger.warning(f"Pexels fallback hatası: {e}")
 
     if clips:
-        logger.info(f"{len(clips)} Pexels videosu indirildi (Sahne Terimleri: {terms})")
+        logger.info(f"{len(clips)} Pexels videosu hazırlandı (Hedef Süre: {target_duration:.1f}s, İndirilen Toplam: {total_downloaded_dur:.1f}s)")
     return clips
 
 
@@ -533,65 +563,55 @@ def build_cycling_background(clips: List[str], target_duration: float,
                              output_path: str, w: int, h: int,
                              transition: str = "none",
                              transition_dur: float = 0.5) -> Optional[str]:
-    """İndirilen farklı klipleri döngüsel ve yumuşak geçişle birleştirir."""
+    """İndirilen tüm farklı klipleri süreye eşit dağıtarak ve yumuşak geçişle birleştirir."""
     if not clips:
         return None
 
-    if len(clips) == 1:
-        try:
-            import shutil
-            shutil.copy(clips[0], output_path)
-            return output_path
-        except Exception:
-            return clips[0]
-
-    pool = list(clips)
-    ordered: List[str] = []
-    total = 0.0
-    i = 0
-    max_repeats = max(3, len(pool) * 3)
-    while total < target_duration + 1.0 and (len(ordered) < max_repeats):
-        c = pool[i % len(pool)]
-        try:
-            d = get_audio_duration(c)
-        except Exception:
-            d = 5.0
-        ordered.append(c)
-        total += d
-        i += 1
-        if len(pool) == 1 and total >= target_duration:
-            break
-
-    if not ordered:
+    valid_clips = [c for c in clips if os.path.exists(c) and os.path.getsize(c) > 1024]
+    if not valid_clips:
         return None
 
-    use_xfade = (transition == "crossfade" and len(ordered) >= 2)
-    if use_xfade:
+    if len(valid_clips) == 1:
         try:
-            min_dur = min(get_audio_duration(c) for c in ordered)
+            import shutil
+            shutil.copy(valid_clips[0], output_path)
+            return output_path
         except Exception:
-            min_dur = 5.0
-        if min_dur <= transition_dur + 0.05:
-            use_xfade = False
+            return valid_clips[0]
+
+    ordered: List[str] = list(valid_clips)
+    num_clips = len(ordered)
+    td = transition_dur if transition == "crossfade" else 0.0
+
+    # Her klibe düşen hedef süre (tüm video süresine eşit paylaştır)
+    target_clip_dur = (target_duration + (num_clips - 1) * td) / num_clips
 
     inputs: List[str] = []
     fparts: List[str] = []
+    actual_durs: List[float] = []
+
     for idx, c in enumerate(ordered):
         inputs += ["-i", c]
+        try:
+            raw_dur = get_audio_duration(c)
+        except Exception:
+            raw_dur = target_clip_dur
+        clip_dur = min(raw_dur, max(2.5, target_clip_dur))
+        actual_durs.append(clip_dur)
         fparts.append(
             f"[{idx}:v]scale={w}:{h}:force_original_aspect_ratio=increase,"
-            f"crop={w}:{h},setsar=1[v{idx}]"
+            f"crop={w}:{h},setsar=1,fps=30,format=yuv420p,"
+            f"trim=duration={clip_dur:.2f},setpts=PTS-STARTPTS[v{idx}]"
         )
 
+    use_xfade = (transition == "crossfade" and len(ordered) >= 2)
     if use_xfade:
-        try:
-            durations = [get_audio_duration(c) for c in ordered]
-        except Exception:
-            durations = [5.0] * len(ordered)
-        td = transition_dur
+        min_clip_dur = min(actual_durs)
+        if min_clip_dur <= td + 0.1:
+            td = max(0.2, min_clip_dur - 0.2)
         prev = "v0"
         for idx in range(1, len(ordered)):
-            offset = sum(durations[:idx]) - idx * td
+            offset = sum(actual_durs[:idx]) - idx * td
             fparts.append(
                 f"[{prev}][v{idx}]xfade=transition=fade:duration={td:.2f}"
                 f":offset={offset:.2f}[x{idx}]"
@@ -615,10 +635,38 @@ def build_cycling_background(clips: List[str], target_duration: float,
         output_path
     ]
     try:
-        subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if res.returncode != 0 or not os.path.exists(output_path) or os.path.getsize(output_path) <= 1024:
+            logger.warning(f"Döngüsel arka plan xfade hatası: {res.stderr[-300:] if res.stderr else ''}. Basit concat deneniyor...")
+            concat_fparts = [
+                f"[{idx}:v]scale={w}:{h}:force_original_aspect_ratio=increase,"
+                f"crop={w}:{h},setsar=1,fps=30,format=yuv420p[cv{idx}]"
+                for idx in range(len(ordered))
+            ]
+            concat_filter = "".join(f"[cv{idx}]" for idx in range(len(ordered)))
+            concat_filter += f"concat=n={len(ordered)}:v=1[cv]"
+            fb_chain = ";".join(concat_fparts) + ";" + concat_filter
+            fb_cmd = [
+                "ffmpeg", "-y"
+            ] + inputs + [
+                "-filter_complex", fb_chain,
+                "-map", "[cv]",
+                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-an",
+                "-t", f"{target_duration + 0.2:.2f}",
+                output_path
+            ]
+            fb_res = subprocess.run(fb_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if fb_res.returncode != 0 or not os.path.exists(output_path) or os.path.getsize(output_path) <= 1024:
+                logger.warning(f"Concat de başarısız, ilk klip kullanılıyor: {ordered[0]}")
+                import shutil
+                shutil.copy(ordered[0], output_path)
     except Exception as e:
         logger.warning(f"Döngüsel arka plan birleştirme hatası: {e}")
-        return None
+        try:
+            import shutil
+            shutil.copy(ordered[0], output_path)
+        except Exception:
+            return None
 
     return output_path if (os.path.exists(output_path) and os.path.getsize(output_path) > 1024) else None
 
@@ -1007,7 +1055,7 @@ def build_lecture_video(
 
         bg_clips = fetch_pexels_clips(
             query=query, orientation=orientation, outdir=pexels_dir,
-            w=w, h=h, max_clips=6
+            w=w, h=h, max_clips=6, target_duration=audio_dur, script=script
         )
 
         if bg_clips:
