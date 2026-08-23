@@ -121,12 +121,16 @@ def extract_task_params(fields: dict, files: dict) -> tuple[dict, str | None, st
     voice_volume = max(0.1, min(3.0, float(_val("voice_volume", "prod_voice_volume", 1.0) or 1.0)))
     aspect = fields.get("aspect") if fields.get("aspect") in ("9:16", "16:9", "1:1") \
         else (prod.get("prod_aspect") if prod.get("prod_aspect") in ("9:16", "16:9", "1:1") else "9:16")
+    resolution = str(_val("resolution", "prod_resolution", "720p")).strip().lower() or "720p"
     bg_style = str(_val("bg_style", "prod_bg_style", "chalkboard")) or "chalkboard"
     sub_color = str(_val("sub_color", "prod_sub_color", "#FFFFFF")) or "#FFFFFF"
     sub_pos = fields.get("sub_pos") if fields.get("sub_pos") in ("bottom", "center", "top") \
         else (prod.get("prod_sub_pos") if prod.get("prod_sub_pos") in ("bottom", "center", "top") else "bottom")
-    sub_size = max(12, min(36, int(_val("sub_size", "prod_sub_size", 18) or 18)))
+    sub_size = max(12, min(40, int(_val("sub_size", "prod_sub_size", 18) or 18)))
     sub_box = str(_val("sub_box", "prod_sub_box", "false")).lower() in ("true", "1", "yes")
+    sub_bold = str(_val("sub_bold", "prod_sub_bold", "true")).lower() in ("true", "1", "yes")
+    sub_font = str(_val("sub_font", "prod_sub_font", "Roboto")).strip() or "Roboto"
+    outline_color = str(_val("outline_color", "prod_outline_color", "#000000")).strip() or "#000000"
     subtitle_enabled = str(_val("subtitle_enabled", "prod_subtitle_enabled", "true")).lower() in ("true", "1", "yes")
     bgm_source = fields.get("bgm_source") or prod.get("prod_bgm_mode", "none")
     bgm_volume = max(0.0, min(1.0, float(_val("bgm_volume", "prod_bgm_volume", 0.15) or 0.15)))
@@ -140,6 +144,7 @@ def extract_task_params(fields: dict, files: dict) -> tuple[dict, str | None, st
         "voice_rate": voice_rate,
         "voice_volume": voice_volume,
         "aspect": aspect,
+        "resolution": resolution,
         "bg_style": bg_style,
         "pexels_query": str(fields.get("pexels_query") or "").strip(),
         "subtitle_enabled": subtitle_enabled,
@@ -147,6 +152,9 @@ def extract_task_params(fields: dict, files: dict) -> tuple[dict, str | None, st
         "sub_pos": sub_pos,
         "sub_size": sub_size,
         "sub_box": sub_box,
+        "sub_bold": sub_bold,
+        "sub_font": sub_font,
+        "outline_color": outline_color,
         "bgm_mode": "random" if bgm_source == "random" else "none",
         "bgm_volume": bgm_volume,
         "transition": transition,
@@ -525,13 +533,17 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             voice_volume=float(fields.get("voice_volume") or prod.get("prod_voice_volume", 1.0)),
             aspect=fields.get("aspect") if fields.get("aspect") in ("9:16", "16:9", "1:1")
             else prod.get("prod_aspect", "9:16"),
+            resolution=str(fields.get("resolution") or prod.get("prod_resolution", "720p")).strip().lower(),
             bg_style=fields.get("bg_style") or prod.get("prod_bg_style", "chalkboard"),
             subtitle_enabled=str(fields.get("subtitle_enabled") or prod.get("prod_subtitle_enabled", "true")).lower() in ("true", "1", "yes"),
             sub_color=fields.get("sub_color") or prod.get("prod_sub_color", "#FFFFFF"),
             sub_pos=fields.get("sub_pos") if fields.get("sub_pos") in ("bottom", "center", "top")
             else prod.get("prod_sub_pos", "bottom"),
-            sub_size=max(12, min(36, int(fields.get("sub_size") or prod.get("prod_sub_size", 18)))),
+            sub_size=max(12, min(40, int(fields.get("sub_size") or prod.get("prod_sub_size", 18)))),
             sub_box=str(fields.get("sub_box") or prod.get("prod_sub_box", "false")).lower() in ("true", "1", "yes"),
+            sub_bold=str(fields.get("sub_bold") or prod.get("prod_sub_bold", "true")).lower() in ("true", "1", "yes"),
+            sub_font=str(fields.get("sub_font") or prod.get("prod_sub_font", "Roboto")).strip() or "Roboto",
+            outline_color=str(fields.get("outline_color") or prod.get("prod_outline_color", "#000000")).strip() or "#000000",
             bgm_mode="random" if (fields.get("bgm_source") or prod.get("prod_bgm_mode", "none")) == "random" else "none",
             transition=fields.get("transition") or prod.get("prod_transition", "none"),
             transition_dur=float(fields.get("transition_dur") or prod.get("prod_transition_dur", 0.5)),

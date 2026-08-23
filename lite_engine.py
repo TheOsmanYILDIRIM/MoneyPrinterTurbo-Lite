@@ -11,11 +11,51 @@ from loguru import logger
 from PIL import Image, ImageDraw, ImageFont
 import settings_manager
 
+# -----------------------------------------------------------------------------
+# Çözünürlük ve Boyut Matrisi (480p'den 4K UHD'ye Kadar Tam Destek)
+# -----------------------------------------------------------------------------
 RESOLUTIONS = {
-    "9:16": (720, 1280),   # Dikey Shorts/Reels/TikTok
-    "16:9": (1280, 720),   # Yatay YouTube/Ders
-    "1:1": (720, 720),     # Kare
+    # 720p (HD - Varsayılan mobil / hızlı render)
+    "9:16_720p": (720, 1280),
+    "16:9_720p": (1280, 720),
+    "1:1_720p": (720, 720),
+    
+    # 1080p (Full HD - YouTube / Shorts Yüksek Kalite)
+    "9:16_1080p": (1080, 1920),
+    "16:9_1080p": (1920, 1080),
+    "1:1_1080p": (1080, 1080),
+    
+    # 1440p (2K Quad HD)
+    "9:16_2k": (1440, 2560),
+    "16:9_2k": (2560, 1440),
+    "1:1_2k": (1440, 1440),
+    
+    # 2160p (4K Ultra HD)
+    "9:16_4k": (2160, 3840),
+    "16:9_4k": (3840, 2160),
+    "1:1_4k": (2160, 2160),
+    
+    # 480p (SD - Ultra Hızlı Taslak)
+    "9:16_480p": (480, 854),
+    "16:9_480p": (854, 480),
+    "1:1_480p": (480, 480),
+
+    # Geriye dönük uyumluluk (Eski doğrudan aspect çağrıları için)
+    "9:16": (720, 1280),
+    "16:9": (1280, 720),
+    "1:1": (720, 720),
 }
+
+def resolve_video_dimensions(aspect: str = "9:16", resolution: str = "720p") -> Tuple[int, int]:
+    """Format (9:16, 16:9, 1:1) ve Çözünürlük (480p, 720p, 1080p, 2k, 4k) ikilisini çözümler."""
+    res_clean = (resolution or "720p").lower().replace(" ", "").replace("fhd", "1080p").replace("hd", "720p").replace("uhd", "4k").replace("qhd", "2k")
+    key = f"{aspect}_{res_clean}"
+    if key in RESOLUTIONS:
+        return RESOLUTIONS[key]
+    if aspect in RESOLUTIONS:
+        return RESOLUTIONS[aspect]
+    return (720, 1280)
+
 
 # İptal desteği: çalışan ffmpeg süreçlerini görev kimliğiyle izleriz.
 class TaskCancelled(Exception):
@@ -34,8 +74,10 @@ BGM_EXTENSIONS = (".mp3", ".m4a", ".aac", ".wav", ".flac", ".ogg", ".opus")
 
 
 def pick_random_bgm() -> Optional[str]:
-    """resource/songs/ klasorunden rastgele muzik secer; bos ise None doner."""
+    """resource/songs/ klasöründen rastgele müzik seçer; boş ise None döner."""
     try:
+        if not os.path.isdir(SONGS_DIR):
+            return None
         files = [os.path.join(SONGS_DIR, f) for f in os.listdir(SONGS_DIR)
                  if f.lower().endswith(BGM_EXTENSIONS)]
     except OSError:
@@ -64,46 +106,56 @@ def format_ass_time(seconds: float) -> str:
     return f"{h}:{m:02d}:{s:02d}.{c:02d}"
 
 
-# sub_size etiketleri -> min(w,h) yuzdesi olarak font boyutu
-FONT_SCALE = {14: 0.052, 18: 0.066, 22: 0.080, 28: 0.094}
+# sub_size etiketleri -> min(w,h) yüzdesi olarak font boyutu
+FONT_SCALE = {12: 0.045, 14: 0.052, 18: 0.066, 22: 0.080, 28: 0.094, 34: 0.110, 40: 0.130}
 DEFAULT_FONT_SCALE = 0.066
 
 
 def compute_subtitle_metrics(width: int, height: int, sub_size: int,
                              boxed: bool) -> dict:
-    """Ekrana sigdirma metriklerini hesaplar."""
+    """Ekrana sığdırma metriklerini çözünürlüğe göre dinamik hesaplar."""
     base = min(width, height)
-    fontsize = max(16, round(base * FONT_SCALE.get(int(sub_size or 18), DEFAULT_FONT_SCALE)))
-    # Ortalama karakter genisligi ~ fontsize*0.52 (Roboto); guvenli genislik %88
+    scale = FONT_SCALE.get(int(sub_size or 18), DEFAULT_FONT_SCALE)
+    fontsize = max(16, round(base * scale))
     usable_width = width * 0.88
     chars_per_line = max(10, int(usable_width / (fontsize * 0.52)))
     return {
         "fontsize": fontsize,
         "chars_per_line": chars_per_line,
-        "max_chars": chars_per_line * 2,   # en fazla 2 satir
+        "max_chars": chars_per_line * 2,
         "margin_lr": round(width * 0.06),
-        "outline": max(2, round(fontsize * 0.06)),
+        "outline": max(2, round(fontsize * 0.07)),
         "border_style": 3 if boxed else 1
     }
 
 
-ASS_COLOR_MAP = {"#FFFFFF": "&H00FFFFFF", "#FFD700": "&H0000D7FF",
-                 "#38BDF8": "&H00F8BD38", "#4ADE80": "&H0080DE4A"}
+def hex_to_ass_color(hex_str: str, alpha_hex: str = "00") -> str:
+    """#RRGGBB formatını ASS &HAABBGGRR formatına çevirir."""
+    if not hex_str:
+        return "&H00FFFFFF"
+    c = hex_str.strip().lstrip("#")
+    if len(c) == 3:
+        c = "".join([x * 2 for x in c])
+    if len(c) == 6:
+        r, g, b = c[0:2], c[2:4], c[4:6]
+        return f"&H{alpha_hex}{b}{g}{r}"
+    return "&H00FFFFFF"
 
 
 def write_ass_subtitles(cues: List[Tuple[float, float, str]], path: str,
                         width: int, height: int, sub_color: str = "#FFFFFF",
                         sub_pos: str = "bottom", sub_size: int = 18,
-                        boxed: bool = False) -> str:
-    """Video cozunurlugune tam oturan .ass altyazi uretir."""
+                        boxed: bool = False, is_bold: bool = True,
+                        font_name: str = "Roboto", outline_color: str = "#000000",
+                        outline_width: Optional[int] = None) -> str:
+    """Video çözünürlüğüne (720p..4K) tam oturan zengin özelleştirmeli .ass altyazı üretir."""
     m = compute_subtitle_metrics(width, height, sub_size, boxed)
 
-    c = (sub_color or "#FFFFFF").lstrip("#")
-    primary = ASS_COLOR_MAP.get(f"#{c.upper()}",
-                                f"&H00{c[4:6]}{c[2:4]}{c[0:2]}" if len(c) == 6 else "&H00FFFFFF")
+    primary = hex_to_ass_color(sub_color, "00")
+    bold_flag = 1 if is_bold else 0
 
     if sub_pos == "top":
-        alignment, margin_v = 8, round(height * 0.07)
+        alignment, margin_v = 8, round(height * 0.08)
     elif sub_pos == "center":
         alignment, margin_v = 5, 0
     else:
@@ -111,12 +163,12 @@ def write_ass_subtitles(cues: List[Tuple[float, float, str]], path: str,
         margin_v = round(height * (0.10 if height > width else 0.08))
 
     if boxed:
-        outline_color = "&H96000000"  # yari saydam siyah kutu
-        outline_w = round(m["fontsize"] * 0.22)
+        ass_outline_color = "&H96000000"  # yarı saydam siyah kutu
+        ass_outline_w = round(m["fontsize"] * 0.22)
         shadow_w = 0
     else:
-        outline_color = "&H00000000"
-        outline_w = m["outline"]
+        ass_outline_color = hex_to_ass_color(outline_color or "#000000", "00")
+        ass_outline_w = outline_width if outline_width is not None else m["outline"]
         shadow_w = 1
 
     header = f"""[Script Info]
@@ -128,7 +180,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Sub,Roboto,{m['fontsize']},{primary},&H000000FF,{outline_color},&H80000000,0,0,0,0,100,100,0,0,{m['border_style']},{outline_w},{shadow_w},{alignment},{m['margin_lr']},{m['margin_lr']},{margin_v},1
+Style: Sub,{font_name},{m['fontsize']},{primary},&H000000FF,{ass_outline_color},&H80000000,{bold_flag},0,0,0,100,100,0,0,{m['border_style']},{ass_outline_w},{shadow_w},{alignment},{m['margin_lr']},{m['margin_lr']},{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -138,8 +190,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         text = text.replace("\n", " ").strip()
         if not text:
             continue
-        lines.append(f"Dialogue: 0,{format_ass_time(start)},{format_ass_time(end)},"
-                     f"Sub,,0,0,0,,{text}\n")
+        lines.append(f"Dialogue: 0,{format_ass_time(start)},{format_ass_time(end)},Sub,,0,0,0,,{text}\n")
+    
     with open(path, "w", encoding="utf-8") as f:
         f.writelines(lines)
     return path
@@ -178,17 +230,23 @@ def split_sentence_to_cues(sentence_text: str, start_time: float, end_time: floa
     return cues
 
 
-def clean_search_term(raw_query: str) -> str:
-    # Türkçe karakterleri ve gereksiz noktalama işaretlerini temizle
+def extract_search_terms(raw_query: str) -> List[str]:
+    """Sorguyu sahne bazlı temiz arama terimleri listesine ayırır."""
+    if not raw_query:
+        return ["education study blackboard"]
     tr_map = str.maketrans("çğıöşüÇĞİÖŞÜ", "cgiosuCGIOSU")
     cleaned = raw_query.translate(tr_map)
-    terms = [k.strip() for k in re.split(r"[,;]+", cleaned) if k.strip()]
-    if not terms:
-        return "education study blackboard"
-    return " ".join(terms[:4])
+    parts = [re.sub(r"[^a-zA-Z0-9\s]", " ", p).strip() for p in re.split(r"[,;\n\.]+", cleaned)]
+    terms = [re.sub(r"\s+", " ", p).strip() for p in parts if len(p.strip()) > 1]
+    return terms if terms else ["education study blackboard"]
 
 
-def _download_pexels_clip(url: str, output_path: str, w: int, h: int, timeout: int = 25) -> bool:
+def clean_search_term(raw_query: str) -> str:
+    terms = extract_search_terms(raw_query)
+    return terms[0] if terms else "education study blackboard"
+
+
+def _download_pexels_clip(url: str, output_path: str, w: int, h: int, timeout: int = 30) -> bool:
     """Tek bir Pexels videosunu indirir ve hedef çözünürlüğe ölçekler."""
     tmp_path = output_path + ".raw.mp4"
     try:
@@ -200,7 +258,8 @@ def _download_pexels_clip(url: str, output_path: str, w: int, h: int, timeout: i
                     f.write(chunk)
         if not os.path.exists(tmp_path) or os.path.getsize(tmp_path) < 1024:
             return False
-        # Hedef çözünürlüğe ölçekle ki birleştirme (concat) sorunsuz olsun.
+        
+        # Hedef çözünürlüğe ölçekle
         cmd = [
             "ffmpeg", "-y", "-i", tmp_path,
             "-vf", f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1",
@@ -209,7 +268,8 @@ def _download_pexels_clip(url: str, output_path: str, w: int, h: int, timeout: i
         ]
         subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
-            os.remove(tmp_path)
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
         except Exception:
             pass
         return os.path.exists(output_path) and os.path.getsize(output_path) > 1024
@@ -220,79 +280,94 @@ def _download_pexels_clip(url: str, output_path: str, w: int, h: int, timeout: i
 
 def fetch_pexels_clips(query: str, orientation: str = "portrait", outdir: str = ".",
                        w: int = 720, h: int = 1280, max_clips: int = 6) -> List[str]:
-    """Sorguya uyan birden fazla Pexels videosunu indirir (orijinal projedeki gibi).
-
-    Tekrarlı (döngüsel) tek video yerine, birden çok farklı klip indirip
-    bunları süreye göre birleştirmek için kullanılır.
+    """Çoklu sahne arama terimleri varsa her biri için ayrı video arar ve indirir.
+    Böylece tüm video boyunca tek bir klip yerine sahneler değiştikçe zengin videolar kullanılır.
     """
     api_key = settings_manager.get_setting("pexels_api_keys", "").split(",")[0].strip()
     if not api_key:
         logger.warning("Pexels API anahtarı tanımlı değil (Ayarlar'dan ekleyin)")
         return []
 
-    search_query = clean_search_term(query)
+    terms = extract_search_terms(query)
     headers = {"Authorization": api_key}
-    url = f"https://api.pexels.com/videos/search?query={requests.utils.quote(search_query)}&per_page=12&orientation={orientation}"
+    clips: List[str] = []
+    seen_ids = set()
 
-    try:
-        res = requests.get(url, headers=headers, timeout=8)
-        data = res.json() if res.status_code == 200 else {}
-        videos = data.get("videos", [])
+    # Sahne başına düşen klip sayısı
+    clips_per_term = max(1, max_clips // len(terms)) if len(terms) > 1 else max_clips
 
-        if not videos:
-            # Genel terimle dene
-            fallback_terms = ["study library", "blackboard education", "office work", "nature landscape"]
-            fb_q = random.choice(fallback_terms)
-            fb_url = f"https://api.pexels.com/videos/search?query={requests.utils.quote(fb_q)}&per_page=8&orientation={orientation}"
-            r_fb = requests.get(fb_url, headers=headers, timeout=8)
-            if r_fb.status_code == 200:
-                videos = r_fb.json().get("videos", [])
-
-        if not videos:
-            return []
-
-        # Farklı videoları karıştır, en fazla max_clips kadar indir.
-        random.shuffle(videos)
-        clips: List[str] = []
-        for idx, video in enumerate(videos):
-            if len(clips) >= max_clips:
-                break
-            video_files = video.get("video_files", [])
-
-            best_url = None
-            for vf in video_files:
-                if vf.get("width") == 720 or vf.get("height") == 1280 or vf.get("quality") == "hd":
-                    best_url = vf.get("link")
-                    break
-            if not best_url and video_files:
-                best_url = video_files[0].get("link")
-            if not best_url:
+    for term in terms:
+        if len(clips) >= max_clips:
+            break
+        search_q = " ".join(term.split()[:4])
+        url = f"https://api.pexels.com/videos/search?query={requests.utils.quote(search_q)}&per_page=8&orientation={orientation}"
+        try:
+            res = requests.get(url, headers=headers, timeout=8)
+            videos = res.json().get("videos", []) if res.status_code == 200 else []
+            if not videos:
                 continue
 
-            out_path = os.path.join(outdir, f"pexels_{idx}.mp4")
-            if _download_pexels_clip(best_url, out_path, w, h):
-                clips.append(out_path)
+            term_added = 0
+            for video in videos:
+                vid_id = video.get("id")
+                if vid_id in seen_ids:
+                    continue
+                seen_ids.add(vid_id)
+                video_files = video.get("video_files", [])
 
-        if clips:
-            logger.info(f"{len(clips)} Pexels videosu indirildi: {search_query}")
-        return clips
-    except Exception as e:
-        logger.warning(f"Pexels hatası: {e}")
-        return []
+                best_url = None
+                for vf in video_files:
+                    vw, vh = vf.get("width", 0), vf.get("height", 0)
+                    if (w >= 1080 or h >= 1080) and (vf.get("quality") == "hd" or vw >= 1080 or vh >= 1080):
+                        best_url = vf.get("link")
+                        break
+                    elif vw == 720 or vh == 1280 or vf.get("quality") == "hd":
+                        best_url = vf.get("link")
+                        break
+                if not best_url and video_files:
+                    best_url = video_files[0].get("link")
+                if not best_url:
+                    continue
+
+                out_path = os.path.join(outdir, f"pexels_{len(clips)}.mp4")
+                if _download_pexels_clip(best_url, out_path, w, h):
+                    clips.append(out_path)
+                    term_added += 1
+                    if term_added >= clips_per_term or len(clips) >= max_clips:
+                        break
+        except Exception as e:
+            logger.warning(f"Pexels terim '{search_q}' hatası: {e}")
+
+    # Hiç klip bulunamadıysa genel fallback terimleri dene
+    if not clips:
+        fallback_terms = ["study library", "blackboard education", "office work", "nature landscape", "abstract background"]
+        fb_q = random.choice(fallback_terms)
+        fb_url = f"https://api.pexels.com/videos/search?query={requests.utils.quote(fb_q)}&per_page=6&orientation={orientation}"
+        try:
+            r_fb = requests.get(fb_url, headers=headers, timeout=8)
+            videos = r_fb.json().get("videos", []) if r_fb.status_code == 200 else []
+            for video in videos:
+                if len(clips) >= max_clips:
+                    break
+                video_files = video.get("video_files", [])
+                best_url = video_files[0].get("link") if video_files else None
+                if best_url:
+                    out_path = os.path.join(outdir, f"pexels_{len(clips)}.mp4")
+                    if _download_pexels_clip(best_url, out_path, w, h):
+                        clips.append(out_path)
+        except Exception as e:
+            logger.warning(f"Pexels fallback hatası: {e}")
+
+    if clips:
+        logger.info(f"{len(clips)} Pexels videosu indirildi (Sahne Terimleri: {terms})")
+    return clips
 
 
 def build_cycling_background(clips: List[str], target_duration: float,
                              output_path: str, w: int, h: int,
                              transition: str = "none",
                              transition_dur: float = 0.5) -> Optional[str]:
-    """İndirilen farklı klipleri döngüsel olarak birleştirir.
-
-    Her klip yalnızca bir kez (veya süre yetene kadar) kullanılır; aynı klip
-    ardışık tekrarlanmaz. Tek klip indirilebildiyse onu olduğu gibi döndürür
-    (render aşaması döngüye alır).
-
-    transition="crossfade" ise klipler arası yumuşak geçiş (xfade) uygulanır.
-    """
+    """İndirilen farklı klipleri döngüsel ve yumuşak geçişle birleştirir."""
     if not clips:
         return None
 
@@ -304,13 +379,11 @@ def build_cycling_background(clips: List[str], target_duration: float,
         except Exception:
             return clips[0]
 
-    # Klipleri karıştır, süre yeterli olana kadar döngüsel ekle.
     pool = list(clips)
-    random.shuffle(pool)
     ordered: List[str] = []
     total = 0.0
     i = 0
-    max_repeats = max(3, len(pool) * 2)
+    max_repeats = max(3, len(pool) * 3)
     while total < target_duration + 1.0 and (len(ordered) < max_repeats):
         c = pool[i % len(pool)]
         try:
@@ -327,9 +400,6 @@ def build_cycling_background(clips: List[str], target_duration: float,
         return None
 
     use_xfade = (transition == "crossfade" and len(ordered) >= 2)
-
-    # xfade, herhangi bir klip süresi geçiş süresinden kısa ise bozulur;
-    # o durumda güvenli tara olarak sadece concat'a düş.
     if use_xfade:
         try:
             min_dur = min(get_audio_duration(c) for c in ordered)
@@ -348,7 +418,6 @@ def build_cycling_background(clips: List[str], target_duration: float,
         )
 
     if use_xfade:
-        # Ardışık xfade zinciri: offset'ler kümülatif süreden (n-1)*td düşülerek hesaplanır.
         try:
             durations = [get_audio_duration(c) for c in ordered]
         except Exception:
@@ -388,9 +457,8 @@ def build_cycling_background(clips: List[str], target_duration: float,
     return output_path if (os.path.exists(output_path) and os.path.getsize(output_path) > 1024) else None
 
 
-def fetch_pexels_video(query: str, orientation: str = "portrait", output_path: str = "pexels_bg.mp4") -> Optional[str]:
-    """Geriye dönük uyumluluk: tek bir Pexels videosu indirir."""
-    w, h = (720, 1280) if orientation == "portrait" else (1280, 720)
+def fetch_pexels_video(query: str, orientation: str = "portrait", output_path: str = "pexels_bg.mp4",
+                       w: int = 720, h: int = 1280) -> Optional[str]:
     clips = fetch_pexels_clips(query, orientation, os.path.dirname(output_path) or ".", w, h, max_clips=1)
     if clips:
         try:
@@ -402,166 +470,154 @@ def fetch_pexels_video(query: str, orientation: str = "portrait", output_path: s
     return None
 
 
-async def generate_audio_and_subtitles_async(
+async def generate_speech_edge(
     text: str,
-    voice_name: str = "tr-TR-AhmetNeural",
-    output_audio: str = "audio.mp3",
-    max_words: int = 8,
-    max_chars: int = 60,
-    rate: str = "+0%",
-    volume: str = "+0%",
-) -> List[Tuple[float, float, str]]:
-    """Sesi uretir ve ekrana sigacak sekilde bolunmus altyazi cues dondurur."""
-    sentences = []
-    success = False
+    output_path: str,
+    voice: str = "tr-TR-AhmetNeural",
+    rate: float = 1.0,
+    volume: float = 1.0,
+    cancel_requested: Optional[Callable[[], bool]] = None
+) -> Tuple[str, List[Tuple[float, float, str]]]:
+    """Edge-TTS ile ses ve kelime/cümle zamanlamalarını (cues) üretir."""
+    if cancel_requested and cancel_requested():
+        raise TaskCancelled()
 
-    try:
-        communicate = edge_tts.Communicate(text=text, voice=voice_name, rate=rate, volume=volume)
-        with open(output_audio, "wb") as audio_file:
-            async for chunk in communicate.stream():
-                if chunk["type"] == "audio":
-                    audio_file.write(chunk["data"])
-                elif chunk["type"] == "SentenceBoundary":
-                    start_s = chunk["offset"] / 10_000_000
-                    dur_s = chunk["duration"] / 10_000_000
-                    sentences.append((start_s, start_s + dur_s, chunk.get("text", "")))
-        if os.path.exists(output_audio) and os.path.getsize(output_audio) > 500:
-            success = True
-    except Exception as e:
-        logger.warning(f"Ses '{voice_name}' hata verdi ({e}), Türkçe Ahmet sesine geçiliyor...")
+    rate_str = f"{int((rate - 1.0) * 100):+d}%"
+    vol_str = f"{int((volume - 1.0) * 100):+d}%"
 
-    # Fallback: tr-TR-AhmetNeural
-    if not success:
-        sentences = []
-        communicate = edge_tts.Communicate(text=text, voice="tr-TR-AhmetNeural", rate=rate, volume=volume)
-        with open(output_audio, "wb") as audio_file:
-            async for chunk in communicate.stream():
-                if chunk["type"] == "audio":
-                    audio_file.write(chunk["data"])
-                elif chunk["type"] == "SentenceBoundary":
-                    start_s = chunk["offset"] / 10_000_000
-                    dur_s = chunk["duration"] / 10_000_000
-                    sentences.append((start_s, start_s + dur_s, chunk.get("text", "")))
+    communicate = edge_tts.Communicate(text, voice, rate=rate_str, volume=vol_str)
+    submaker = edge_tts.SubMaker()
 
-    duration = get_audio_duration(output_audio)
+    with open(output_path, "wb") as f:
+        async for chunk in communicate.stream():
+            if cancel_requested and cancel_requested():
+                raise TaskCancelled()
+            if chunk["type"] == "audio":
+                f.write(chunk["data"])
+            elif chunk["type"] == "WordBoundary":
+                submaker.feed(chunk)
 
-    all_cues = []
-    if sentences:
-        for s_start, s_end, s_text in sentences:
-            all_cues.extend(split_sentence_to_cues(s_text, s_start, s_end,
-                                                   max_words=max_words, max_chars=max_chars))
-    else:
-        all_cues = split_sentence_to_cues(text, 0.1, duration,
-                                          max_words=max_words, max_chars=max_chars)
-    return all_cues
+    raw_cues = []
+    for c in submaker.cues:
+        start_s = c.start.total_seconds()
+        end_s = c.end.total_seconds()
+        raw_cues.append((start_s, end_s, c.value))
 
+    # Cues boşsa süreye göre tahmini böl
+    if not raw_cues:
+        total_dur = get_audio_duration(output_path)
+        words = text.split()
+        if words:
+            w_dur = total_dur / len(words)
+            for i, w in enumerate(words):
+                raw_cues.append((i * w_dur, (i + 1) * w_dur, w))
 
-def get_audio_duration(audio_path: str) -> float:
-    cmd = [
-        "ffprobe", "-v", "error", "-show_entries", "format=duration",
-        "-of", "default=noprint_wrappers=1:nokey=1", audio_path
-    ]
-    try:
-        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
-        return float(res.stdout.strip())
-    except Exception as e:
-        raise RuntimeError(f"Ses süresi okunamadı ({audio_path}): {e}")
+    # Cümleleri mantıklı bloklara birleştir
+    refined_cues = []
+    curr_words = []
+    chunk_start = 0.0
+    chunk_end = 0.0
+    for s, e, w in raw_cues:
+        if not curr_words:
+            chunk_start = s
+        curr_words.append(w)
+        chunk_end = e
+        if len(curr_words) >= 4 or len(" ".join(curr_words)) >= 24 or any(w.endswith(p) for p in [".", "!", "?", ","]):
+            refined_cues.append((chunk_start, chunk_end, " ".join(curr_words)))
+            curr_words = []
+    if curr_words:
+        refined_cues.append((chunk_start, chunk_end, " ".join(curr_words)))
+
+    return output_path, refined_cues
 
 
-def wrap_text(text: str, font: ImageFont.FreeTypeFont, max_width: int, draw: ImageDraw.ImageDraw) -> List[str]:
-    words = text.split()
-    if not words:
-        return []
-    lines = []
-    current_line = []
-    for word in words:
-        test_line = " ".join(current_line + [word])
-        bbox = draw.textbbox((0, 0), test_line, font=font)
-        line_w = bbox[2] - bbox[0]
-        if line_w <= max_width:
-            current_line.append(word)
-        else:
-            if current_line:
-                lines.append(" ".join(current_line))
-                current_line = [word]
-            else:
-                lines.append(word)
-                current_line = []
-    if current_line:
-        lines.append(" ".join(current_line))
-    return lines
-
-
-def create_lecture_background(
-    width: int,
-    height: int,
-    subject: str = "",
-    bg_style: str = "dark_slate",
-    output_path: str = "background.png"
+def generate_background_card(
+    subject: str,
+    output_path: str,
+    width: int = 720,
+    height: int = 1280,
+    bg_style: str = "chalkboard"
 ) -> str:
-    if bg_style == "chalkboard":
-        top_color = (20, 42, 30)
-        bottom_color = (12, 28, 20)
-    elif bg_style == "warm_study":
-        top_color = (36, 26, 20)
-        bottom_color = (18, 14, 12)
-    elif bg_style == "midnight_purple":
-        top_color = (30, 20, 45)
-        bottom_color = (16, 10, 24)
-    else:
-        top_color = (18, 24, 38)
-        bottom_color = (10, 14, 22)
-
-    img = Image.new("RGB", (width, height), top_color)
+    """Temiz, modern ve şık arka plan görseli üretir."""
+    img = Image.new("RGB", (width, height), color=(18, 30, 24))
     draw = ImageDraw.Draw(img)
 
+    colors = {
+        "chalkboard": ((16, 42, 31), (28, 68, 50)),
+        "dark_slate": ((15, 23, 42), (30, 41, 59)),
+        "warm_study": ((38, 24, 18), (68, 42, 30)),
+        "midnight_purple": ((24, 16, 42), (48, 28, 78)),
+    }
+    c_top, c_bot = colors.get(bg_style, colors["chalkboard"])
+
+    # Basit dikey gradyan
     for y in range(height):
-        factor = y / height
-        r = int(top_color[0] * (1 - factor) + bottom_color[0] * factor)
-        g = int(top_color[1] * (1 - factor) + bottom_color[1] * factor)
-        b = int(top_color[2] * (1 - factor) + bottom_color[2] * factor)
+        ratio = y / max(1, height)
+        r = int(c_top[0] * (1 - ratio) + c_bot[0] * ratio)
+        g = int(c_top[1] * (1 - ratio) + c_bot[1] * ratio)
+        b = int(c_top[2] * (1 - ratio) + c_bot[2] * ratio)
         draw.line([(0, y), (width, y)], fill=(r, g, b))
 
-    margin = 24
-    # RGB modda alfa yok sayilirak beyaz cizilmesin; koyu ton cerceve
-    frame_color = tuple(min(255, int(c * 1.6)) for c in top_color)
+    # Dekoratif çerçeve ve başlık alanı
+    margin = round(width * 0.04)
     draw.rectangle(
         [(margin, margin), (width - margin, height - margin)],
-        outline=frame_color,
-        width=2
+        outline=(255, 255, 255, 30),
+        width=max(1, round(width * 0.003))
     )
 
-    if subject:
-        title_font_size = 36 if width > height else 30
-        try:
-            title_font = ImageFont.truetype(DEFAULT_FONT_PATH, title_font_size)
-        except Exception:
-            title_font = ImageFont.load_default()
+    # Başlık metni
+    try:
+        font_size = max(24, round(width * 0.055))
+        font = ImageFont.truetype(DEFAULT_FONT_PATH, font_size)
+    except Exception:
+        font = ImageFont.load_default()
 
-        title_lines = wrap_text(subject, title_font, width - 100, draw)
-        title_y = 50
-        for tline in title_lines:
-            bbox = draw.textbbox((0, 0), tline, font=title_font)
-            tw = bbox[2] - bbox[0]
-            tx = (width - tw) // 2
-            draw.text((tx + 2, title_y + 2), tline, font=title_font, fill=(0, 0, 0, 160))
-            draw.text((tx, title_y), tline, font=title_font, fill=(255, 215, 0))
-            title_y += (bbox[3] - bbox[1]) + 8
+    # Başlık satırlarını kır
+    words = subject.split()
+    lines = []
+    cur = []
+    for w in words:
+        cur.append(w)
+        if len(" ".join(cur)) > 18:
+            lines.append(" ".join(cur))
+            cur = []
+    if cur:
+        lines.append(" ".join(cur))
 
-        line_w = int(width * 0.5)
-        line_x = (width - line_w) // 2
-        draw.line([(line_x, title_y + 4), (line_x + line_w, title_y + 4)], fill=(255, 215, 0, 120), width=2)
+    title_y = round(height * 0.12)
+    for line in lines[:3]:
+        bbox = draw.textbbox((0, 0), line, font=font)
+        tw = bbox[2] - bbox[0]
+        tx = (width - tw) // 2
+        draw.text((tx, title_y), line, fill=(255, 215, 0), font=font)
+        title_y += round(font_size * 1.3)
 
-    img.save(output_path, "PNG")
+    img.save(output_path, quality=95)
     return output_path
 
 
-def render_video_with_subtitles(
+def get_audio_duration(file_path: str) -> float:
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        file_path
+    ]
+    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        return float(res.stdout.strip())
+    except Exception:
+        return 10.0
+
+
+def render_video_ffmpeg(
     background_media: str,
     audio_path: str,
     subtitle_path: str,
     output_video: str,
     aspect: str = "9:16",
+    resolution: str = "720p",
     is_video_bg: bool = False,
     subtitle_enabled: bool = True,
     bgm_path: Optional[str] = None,
@@ -569,7 +625,7 @@ def render_video_with_subtitles(
     task_id: Optional[str] = None,
     cancel_requested: Optional[Callable[[], bool]] = None
 ) -> str:
-    width, height = RESOLUTIONS.get(aspect, (720, 1280))
+    width, height = resolve_video_dimensions(aspect, resolution)
     duration = get_audio_duration(audio_path)
 
     work_dir = os.path.dirname(os.path.abspath(subtitle_path))
@@ -578,12 +634,9 @@ def render_video_with_subtitles(
     rel_audio = os.path.relpath(audio_path, work_dir)
     rel_output = os.path.relpath(output_video, work_dir)
 
-    vf_filters = [f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}"]
-    has_subs = (subtitle_enabled and os.path.exists(subtitle_path)
-                and os.path.getsize(subtitle_path) > 0)
+    vf_filters = [f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1"]
+    has_subs = (subtitle_enabled and os.path.exists(subtitle_path) and os.path.getsize(subtitle_path) > 0)
     if has_subs:
-        # .ass dosyasi PlayResX/Y ile video cozunurlugune gore olceklenir;
-        # ekstra force_style gerekmez.
         fonts_dir = os.path.join(os.path.dirname(__file__), "resource", "fonts")
         if os.path.isdir(fonts_dir):
             vf_filters.append(f"subtitles={rel_subs}:fontsdir='{fonts_dir}'")
@@ -593,7 +646,6 @@ def render_video_with_subtitles(
     vf_str = ",".join(vf_filters)
 
     cmd = ["ffmpeg", "-y"]
-
     if is_video_bg:
         cmd.extend(["-stream_loop", "-1", "-i", rel_bg])
     else:
@@ -624,7 +676,7 @@ def render_video_with_subtitles(
         rel_output
     ])
 
-    logger.info(f"FFmpeg render ({aspect})...")
+    logger.info(f"FFmpeg render ({aspect} @ {resolution} -> {width}x{height})...")
 
     def _run(proc_cmd: list):
         proc = subprocess.Popen(proc_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=work_dir)
@@ -665,45 +717,6 @@ def render_video_with_subtitles(
     return output_video
 
 
-def remux_audio_into_video(video_path: str, audio_path: str, output_path: str,
-                           task_id: Optional[str] = None,
-                           cancel_requested: Optional[Callable[[], bool]] = None) -> str:
-    """Mevcut videonun goruntu akisini YENIDEN KODLAMADAN kopyalar ve yeni sesi
-    enjekte eder. Ses degisimi gibi islemlerde cok hizlidir (saniyeler)."""
-    cmd = [
-        "ffmpeg", "-y",
-        "-i", video_path, "-i", audio_path,
-        "-map", "0:v:0", "-map", "1:a:0",
-        "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-        "-shortest", "-movflags", "+faststart", output_path
-    ]
-    logger.info("FFmpeg hizli ses degisimi (stream copy, yeniden kodlama yok)...")
-
-    def _run(proc_cmd: list):
-        proc = subprocess.Popen(proc_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        if task_id:
-            _active_ffmpeg[task_id] = proc
-        try:
-            if cancel_requested and cancel_requested():
-                proc.terminate()
-                raise TaskCancelled()
-            _, _ = proc.communicate()
-        finally:
-            if task_id:
-                _active_ffmpeg.pop(task_id, None)
-        if cancel_requested and cancel_requested():
-            raise TaskCancelled()
-        return proc.returncode
-
-    try:
-        rc = _run(cmd)
-    except TaskCancelled:
-        raise
-    if rc != 0:
-        raise RuntimeError(f"FFmpeg ses degisimi basarisiz (rc={rc})")
-    return output_path
-
-
 def build_lecture_video(
     subject: str,
     script: str,
@@ -711,6 +724,7 @@ def build_lecture_video(
     voice_rate: float = 1.0,
     voice_volume: float = 1.0,
     aspect: str = "9:16",
+    resolution: str = "720p",
     bg_style: str = "chalkboard",
     pexels_query: Optional[str] = None,
     custom_bg_media: Optional[str] = None,
@@ -720,10 +734,13 @@ def build_lecture_video(
     sub_pos: str = "bottom",
     sub_size: int = 18,
     sub_box: bool = False,
+    sub_bold: bool = True,
+    sub_font: str = "Roboto",
+    outline_color: str = "#000000",
     bgm_path: Optional[str] = None,
     bgm_mode: str = "none",
     bgm_volume: float = 0.15,
-    output_dir: str = "/data/data/com.termux/files/home/MoneyPrinterTurbo/output",
+    output_dir: Optional[str] = None,
     filename: str = "ders_video.mp4",
     progress_callback: Optional[Callable[[int, str], None]] = None,
     task_id: Optional[str] = None,
@@ -733,195 +750,130 @@ def build_lecture_video(
     transition: str = "none",
     transition_dur: float = 0.5
 ) -> str:
+    if not output_dir:
+        output_dir = os.path.join(os.path.dirname(__file__), "output")
     os.makedirs(output_dir, exist_ok=True)
     if cancel_requested and cancel_requested():
         raise TaskCancelled()
-    # Kalıcı ara ürünler: varyant (ses/görüntü/altyazı) yeniden üretiminde kullanılır.
+
     audio_path = os.path.join(output_dir, "audio.mp3")
     subtitle_path = os.path.join(output_dir, "subtitle.ass")
     cues_path = os.path.join(output_dir, "subtitle_cues.json")
     final_output = os.path.join(output_dir, filename)
 
-    w, h = RESOLUTIONS.get(aspect, (720, 1280))
-
-    # Ekrana sigdirma metrikleri (cozunurluge gore dinamik satir uzunlugu)
-    metrics = compute_subtitle_metrics(w, h, sub_size, sub_box)
+    w, h = resolve_video_dimensions(aspect, resolution)
 
     bg_media: Optional[str] = None
     is_video = False
-    bg_error: List[str] = []
 
-    need_pexels = (not custom_bg_media) and (bg_style == "pexels" or bool(pexels_query))
-    pexels_dir = output_dir
+    def notify(pct: int, msg: str):
+        if progress_callback:
+            progress_callback(pct, msg)
+
+    # 1. Seslendirme (TTS)
+    if custom_audio and os.path.exists(custom_audio):
+        notify(15, "Özel ses dosyası kullanılıyor...")
+        import shutil
+        shutil.copy(custom_audio, audio_path)
+        cues = []
+        if reuse_cues_path and os.path.exists(reuse_cues_path):
+            with open(reuse_cues_path, "r", encoding="utf-8") as f:
+                cues = json.load(f)
+        else:
+            cues = split_sentence_to_cues(script, 0.0, get_audio_duration(audio_path))
+    else:
+        notify(15, "Seslendirme üretiliyor (Edge TTS)...")
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            _, cues = loop.run_until_complete(
+                generate_speech_edge(script, audio_path, voice_name, voice_rate, voice_volume, cancel_requested)
+            )
+        finally:
+            loop.close()
+
+    with open(cues_path, "w", encoding="utf-8") as f:
+        json.dump(cues, f, ensure_ascii=False)
 
     if cancel_requested and cancel_requested():
         raise TaskCancelled()
 
-    if custom_audio and os.path.exists(custom_audio):
-        if progress_callback:
-            progress_callback(20, "Özel ses dosyası işleniyor...")
-        audio_path = custom_audio
-        # Varyant (örn. altyazı) yeniden üretiminde orijinal cümle zamanlamaları korunur.
-        if reuse_cues_path and os.path.exists(reuse_cues_path):
-            try:
-                with open(reuse_cues_path, "r", encoding="utf-8") as f:
-                    cues = [(float(a), float(b), str(c)) for a, b, c in json.load(f)]
-            except Exception:
-                cues = None
-        else:
-            cues = None
-        if cues is None:
-            dur = get_audio_duration(audio_path)
-            cues = [(0.1, max(1.0, dur - 0.1), script or subject)]
-    else:
-        if progress_callback:
-            progress_callback(20, "Ses ve altyazılar üretiliyor...")
-
-        rate_pct = int((voice_rate - 1.0) * 100)
-        rate_str = f"{rate_pct:+d}%"
-        vol_pct = int((voice_volume - 1.0) * 100)
-        vol_str = f"{vol_pct:+d}%"
-
-        cues = asyncio.run(generate_audio_and_subtitles_async(
-            text=script,
-            voice_name=voice_name,
-            output_audio=audio_path,
-            max_words=max(6, metrics["chars_per_line"] // 6),
-            max_chars=metrics["max_chars"],
-            rate=rate_str,
-            volume=vol_str
-        ))
-
-    # Cümle zamanlamalarını sonraki varyantlar için sakla.
-    try:
-        with open(cues_path, "w", encoding="utf-8") as f:
-            json.dump([[a, b, c] for a, b, c in cues], f, ensure_ascii=False)
-    except Exception:
-        pass
-
-    write_ass_subtitles(
-        cues, subtitle_path, width=w, height=h,
-        sub_color=sub_color, sub_pos=sub_pos,
-        sub_size=sub_size, boxed=sub_box
-    )
-
-    # Hizli ses degisimi: altyazisiz ses varyantinda mevcut videonun goruntusu
-    # yeniden kodlanmadan kopyalanir, yalnizca yeni ses enjekte edilir.
-    # (Kaynak video zaten altyazisiz oldugundan zamanlama sorunu olusmaz.)
-    if source_video_path and os.path.exists(source_video_path) and not subtitle_enabled:
-        if cancel_requested and cancel_requested():
-            raise TaskCancelled()
-        if progress_callback:
-            progress_callback(80, "Ses hızlıca değiştiriliyor (yeniden kodlama yok)...")
-        remux_audio_into_video(
-            video_path=source_video_path,
-            audio_path=audio_path,
-            output_path=final_output,
-            task_id=task_id,
-            cancel_requested=cancel_requested
+    # 2. Altyazı (.ass)
+    if subtitle_enabled and cues:
+        notify(35, "Altyazılar senkronize ediliyor...")
+        write_ass_subtitles(
+            cues, subtitle_path, w, h,
+            sub_color=sub_color, sub_pos=sub_pos, sub_size=sub_size,
+            boxed=sub_box, is_bold=sub_bold, font_name=sub_font,
+            outline_color=outline_color
         )
-        cleanup_temp_files(output_dir, keep=[final_output])
-        if progress_callback:
-            progress_callback(100, "Tamamlandı!")
-        return final_output
 
-    if progress_callback:
-        progress_callback(55, "Arka plan materyalleri hazır...")
-
-    # Önce ses süresini hesapla, sonra o süreyi kapatacak kadar Pexels klibi indir
-    # (gereksiz indirmeyi önlemek için).
-    audio_dur = 30.0
-    try:
-        audio_dur = get_audio_duration(audio_path)
-    except Exception:
-        pass
+    # 3. Arka Plan Materyali
+    need_pexels = (not custom_bg_media) and (bg_style == "pexels" or bool(pexels_query))
+    pexels_dir = output_dir
 
     if custom_bg_media and os.path.exists(custom_bg_media):
+        notify(50, "Özel arka plan materyali kullanılıyor...")
         bg_media = custom_bg_media
-        is_video = custom_bg_media.lower().endswith((".mp4", ".mov", ".mkv", ".avi", ".webm"))
+        is_video = bg_media.lower().endswith((".mp4", ".mov", ".mkv", ".webm"))
     elif need_pexels:
-        if cancel_requested and cancel_requested():
-            raise TaskCancelled()
+        notify(45, "Pexels stok videoları aranıyor ve indiriliyor...")
+        orientation = "portrait" if aspect == "9:16" else ("square" if aspect == "1:1" else "landscape")
         query = pexels_query or subject or "education blackboard study"
-        orientation = "portrait" if aspect == "9:16" else "landscape"
-        # Ortalama ~15 sn'lik klip varsayımıyla süreye yetecek sayıyı hesapla.
-        needed = max(2, min(8, int(audio_dur // 15) + 1))
+        audio_dur = get_audio_duration(audio_path)
+
         bg_clips = fetch_pexels_clips(
             query=query, orientation=orientation, outdir=pexels_dir,
-            w=w, h=h, max_clips=needed
+            w=w, h=h, max_clips=6
         )
+
         if bg_clips:
-            cycling = os.path.join(output_dir, "background.mp4")
-            built = build_cycling_background(
-                bg_clips, audio_dur, cycling, w, h,
+            notify(55, "Video sahneleri ve geçiş efektleri birleştiriliyor...")
+            bg_target = os.path.join(output_dir, "background.mp4")
+            bg_media = build_cycling_background(
+                bg_clips, audio_dur, bg_target, w, h,
                 transition=transition, transition_dur=transition_dur
             )
-            if built and os.path.exists(built):
-                bg_media = built
+            if bg_media:
                 is_video = True
-            else:
-                # Yedek: ilk clip'i döngüye al.
-                bg_media = bg_clips[0]
-                is_video = True
-        else:
-            bg_error.append("Pexels'ten görüntü alınamadı")
 
-    if bg_error:
-        logger.warning(f"Arka plan uyarısı: {bg_error[0]}")
-
-    if not bg_media:
-        bg_path = os.path.join(output_dir, "temp_bg.png")
-        create_lecture_background(
-            width=w,
-            height=h,
-            subject=subject,
-            bg_style=bg_style if bg_style != "pexels" else "chalkboard",
-            output_path=bg_path
-        )
-        bg_media = bg_path
+        if not bg_media:
+            notify(55, "Pexels bulunamadı, şablon arka plan üretiliyor...")
+            bg_media = os.path.join(output_dir, "bg_card.png")
+            generate_background_card(subject, bg_media, w, h, bg_style="chalkboard")
+            is_video = False
+    else:
+        notify(50, "Ders şablonu arka planı hazırlanıyor...")
+        bg_media = os.path.join(output_dir, "bg_card.png")
+        generate_background_card(subject, bg_media, w, h, bg_style=bg_style)
         is_video = False
 
-    if progress_callback:
-        progress_callback(75, "720p video render ediliyor...")
+    if cancel_requested and cancel_requested():
+        raise TaskCancelled()
 
-    effective_bgm = bgm_path
-    if not effective_bgm and bgm_mode == "random":
-        effective_bgm = pick_random_bgm()
+    # 4. Müzik (BGM)
+    active_bgm = None
+    if bgm_mode == "random":
+        active_bgm = pick_random_bgm()
+    elif bgm_path and os.path.exists(bgm_path):
+        active_bgm = bgm_path
 
-    render_video_with_subtitles(
+    # 5. FFmpeg Render
+    notify(70, f"Video render ediliyor ({w}x{h} @ {resolution})...")
+    render_video_ffmpeg(
         background_media=bg_media,
         audio_path=audio_path,
         subtitle_path=subtitle_path,
         output_video=final_output,
         aspect=aspect,
+        resolution=resolution,
         is_video_bg=is_video,
         subtitle_enabled=subtitle_enabled,
-        bgm_path=effective_bgm,
+        bgm_path=active_bgm,
         bgm_volume=bgm_volume,
         task_id=task_id,
         cancel_requested=cancel_requested
     )
 
-    cleanup_temp_files(output_dir, keep=[final_output])
-
-    if progress_callback:
-        progress_callback(100, "Tamamlandı!")
-
+    notify(100, "Tamamlandı!")
     return final_output
-
-
-def cleanup_temp_files(directory: str, keep: List[str]):
-    """Render sonrasi gecici dosyalari temizler."""
-    keep_abs = {os.path.abspath(k) for k in keep}
-    try:
-        for fname in os.listdir(directory):
-            fpath = os.path.join(directory, fname)
-            if os.path.abspath(fpath) in keep_abs:
-                continue
-            if fname.startswith("temp_") or fname.startswith("pexels_"):
-                try:
-                    os.remove(fpath)
-                except Exception:
-                    pass
-    except Exception as e:
-        logger.warning(f"Temp temizleme hatası ({directory}): {e}")

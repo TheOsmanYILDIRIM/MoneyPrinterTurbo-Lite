@@ -161,15 +161,28 @@
 
         <div class="grid-2 mt6">
             <div>
-                <label for="aspect">Format</label>
+                <label for="aspect">Format / En-Boy</label>
                 <select id="aspect">
-                    <option value="9:16">9:16 Dikey (720x1280 Shorts)</option>
-                    <option value="16:9">16:9 Yatay (1280x720 Ders)</option>
-                    <option value="1:1">1:1 Kare (720x720)</option>
+                    <option value="9:16" selected>📱 9:16 Dikey (Shorts / Reels / TikTok)</option>
+                    <option value="16:9">🖥️ 16:9 Yatay (YouTube / Ders Videosu)</option>
+                    <option value="1:1">⏹️ 1:1 Kare (Instagram Post)</option>
                 </select>
             </div>
             <div>
-                <label for="bg_style">Arka Plan</label>
+                <label for="resolution">Çözünürlük Kalitesi</label>
+                <select id="resolution">
+                    <option value="720p" selected>⚡ 720p HD (Hızlı & Optimize)</option>
+                    <option value="1080p">✨ 1080p Full HD (Yüksek Kalite)</option>
+                    <option value="2k">🌟 2K QHD (1440p)</option>
+                    <option value="4k">🔥 4K Ultra HD (2160p)</option>
+                    <option value="480p">🚀 480p SD (Ultra Hızlı Taslak)</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="grid-2 mt6">
+            <div>
+                <label for="bg_style">Arka Plan Stili</label>
                 <select id="bg_style">
                     <option value="chalkboard">📋 Yeşil Ders Tahtası</option>
                     <option value="dark_slate">🌌 Koyu Gece Mavisi</option>
@@ -178,49 +191,85 @@
                     <option value="pexels">🎬 Pexels HD Stok Video</option>
                 </select>
             </div>
+            <div>
+                <label for="pexels_query">Pexels Sahne Arama Terimleri</label>
+                <input type="text" id="pexels_query" placeholder="örn: math classroom, library books, study desk" style="width:100%;box-sizing:border-box;margin-top:4px;">
+            </div>
         </div>
 
-        <div class="section-title">📝 Altyazı</div>
+        <div class="section-title">📝 Gelişmiş Altyazı Özelleştirme</div>
         <div class="grid-2">
             <div>
-                <label for="subtitle_enabled_chk">Altyazı</label>
+                <label for="subtitle_enabled_chk">Altyazı Durumu</label>
                 <label class="switch-row"><input type="checkbox" id="subtitle_enabled_chk" checked> Açık</label>
             </div>
             <div>
-                <label for="sub_pos">Konumu</label>
+                <label for="sub_bold_chk">Kalın Yazı Tipi (Bold)</label>
+                <label class="switch-row"><input type="checkbox" id="sub_bold_chk" checked> Kalın / Vurgulu</label>
+            </div>
+        </div>
+
+        <div class="grid-2 mt6">
+            <div>
+                <label for="sub_pos">Konum</label>
                 <select id="sub_pos">
-                    <option value="bottom" selected>Alt Güvenli Alan</option>
-                    <option value="center">Ekran Ortası</option>
-                    <option value="top">Üst Kısım</option>
+                    <option value="bottom" selected>⬇️ Alt Güvenli Alan</option>
+                    <option value="center">⏺️ Ekran Ortası</option>
+                    <option value="top">⬆️ Üst Kısım</option>
+                </select>
+            </div>
+            <div>
+                <label for="sub_size">Yazı Boyutu</label>
+                <select id="sub_size">
+                    <option value="12">12 - Çok Küçük</option>
+                    <option value="14">14 - Küçük</option>
+                    <option value="18" selected>18 - Normal (Önerilen)</option>
+                    <option value="22">22 - Büyük</option>
+                    <option value="28">28 - Çok Büyük</option>
+                    <option value="34">34 - Dev (Shorts Stili)</option>
+                    <option value="40">40 - Ekstra Dev</option>
                 </select>
             </div>
         </div>
+
         <div class="grid-2 mt6">
             <div>
-                <label for="sub_color">Rengi</label>
+                <label for="sub_color">Yazı Rengi</label>
                 <select id="sub_color">
                     <option value="#FFFFFF" selected>⚪ Parlak Beyaz</option>
                     <option value="#FFD700">🟡 Altın Sarısı</option>
+                    <option value="#FFFF00">⚡ Neon Sarı</option>
                     <option value="#38BDF8">🔵 Canlı Mavi</option>
-                    <option value="#4ADE80">🟢 Yeşil</option>
+                    <option value="#4ADE80">🟢 Neon Yeşil</option>
+                    <option value="#EF4444">🔴 Ateş Kırmızı</option>
+                    <option value="#C084FC">🟣 Canlı Mor</option>
+                    <option value="#FB923C">🟠 Sıcak Turuncu</option>
                 </select>
             </div>
             <div>
-                <label for="sub_size">Boyutu</label>
-                <select id="sub_size">
-                    <option value="14">Küçük</option>
-                    <option value="18" selected>Normal</option>
-                    <option value="22">Büyük</option>
-                    <option value="28">Çok Büyük</option>
+                <label for="outline_color">Kontur / Çerçeve Rengi</label>
+                <select id="outline_color">
+                    <option value="#000000" selected>⚫ Siyah Kontur</option>
+                    <option value="#1E293B">🌑 Koyu Lacivert</option>
+                    <option value="#FFFFFF">⚪ Beyaz Kontur</option>
                 </select>
             </div>
         </div>
+
         <div class="grid-2 mt6">
             <div>
-                <label for="sub_box">Okunabilirlik</label>
+                <label for="sub_box">Okunabilirlik Kutusu</label>
                 <select id="sub_box">
-                    <option value="false" selected>Düz (kontur)</option>
-                    <option value="true">Yarı saydam kutu</option>
+                    <option value="false" selected>Düz (Şık Kontur & Gölge)</option>
+                    <option value="true">Yarı Saydam Koyu Kutu</option>
+                </select>
+            </div>
+            <div>
+                <label for="sub_font">Yazı Tipi Ailesi</label>
+                <select id="sub_font">
+                    <option value="Roboto" selected>Roboto (Modern)</option>
+                    <option value="sans-serif">Sans-Serif (Sistem)</option>
+                    <option value="Arial">Arial (Klasik)</option>
                 </select>
             </div>
         </div>

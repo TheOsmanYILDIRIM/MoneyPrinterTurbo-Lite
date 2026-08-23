@@ -154,25 +154,28 @@ function toggleBgmInputs() {
 }
 
 function collectCommonParams(scope) {
-    // Tüm üretim ayarları artık Ayarlar -> Üretim Tercihleri'nde (global).
     const p = {
         subject: el("subject").value.trim(),
         script: el("script").value.trim(),
-        pexels_query: el("pexels_query").value.trim(),
+        pexels_query: el("pexels_query") ? el("pexels_query").value.trim() : "",
         voice: el("voice").value,
         voice_rate: el("voice_rate").value,
         voice_volume: el("voice_volume").value,
         aspect: el("aspect").value,
+        resolution: el("resolution") ? el("resolution").value : "720p",
         bg_style: el("bg_style").value,
         sub_color: el("sub_color").value,
         sub_pos: el("sub_pos").value,
         sub_size: el("sub_size").value,
         sub_box: el("sub_box").value,
+        sub_bold: el("sub_bold_chk") ? (el("sub_bold_chk").checked ? "true" : "false") : "true",
+        sub_font: el("sub_font") ? el("sub_font").value : "Roboto",
+        outline_color: el("outline_color") ? el("outline_color").value : "#000000",
         subtitle_enabled: el("subtitle_enabled_chk").checked ? "true" : "false",
         bgm_source: el("bgm_source").value,
         bgm_volume: el("bgm_volume").value,
-        transition: el("prod_transition").value,
-        transition_dur: el("prod_transition_dur").value
+        transition: el("prod_transition") ? el("prod_transition").value : "none",
+        transition_dur: el("prod_transition_dur") ? el("prod_transition_dur").value : "0.5"
     };
     if (scope === "batch") p.batch_text = el("batch_text").value;
     return p;

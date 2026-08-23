@@ -6,7 +6,7 @@ from typing import Optional
 from loguru import logger
 
 import task_store
-from lite_engine import build_lecture_video, RESOLUTIONS, TaskCancelled
+from lite_engine import build_lecture_video, resolve_video_dimensions, TaskCancelled
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TASKS_DIR = os.path.join(BASE_DIR, "storage", "tasks")
@@ -15,7 +15,7 @@ _wake = threading.Event()
 _thread: Optional[threading.Thread] = None
 _current_lock = threading.Lock()
 
-# İptal istenen görev kimlikleri (worker tarafından işlenirken kontrol edilir).
+# İptal istenen görev kimlikleri
 CANCEL_FLAGS: set = set()
 
 
@@ -24,7 +24,7 @@ def current_task_id() -> Optional[str]:
 
 
 def enqueue(task_id: str) -> bool:
-    """Gorevi kuyruga alir (state=queued) ve worker'i uyandirir."""
+    """Görevi kuyruğa alır (state=queued) ve worker'ı uyandırır."""
     task = task_store.get_task(task_id)
     if not task:
         return False
@@ -77,7 +77,6 @@ def cancel_task(task_id: str) -> bool:
             log_message="İptal isteği alındı"
         )
         return True
-    # Tamamlanmış/başarısız görevler iptal edilemez.
     return False
 
 
@@ -91,8 +90,9 @@ def _run_task(task_id: str):
 
     subject = task.get("subject", "Ders")
     aspect = task.get("aspect", "9:16")
-    w, h = RESOLUTIONS.get(aspect, (720, 1280))
-    filename = f"final_{h}p.mp4"
+    resolution = task.get("resolution", "720p")
+    w, h = resolve_video_dimensions(aspect, resolution)
+    filename = f"final_{resolution}_{h}p.mp4"
 
     task_store.update_task(
         task_id,
@@ -110,7 +110,7 @@ def _run_task(task_id: str):
 
     is_cancelled = lambda: task_id in CANCEL_FLAGS
 
-    # Varyant (görüntü/altyazı) görevlerinde orijinal cümle zamanlamalarını koru.
+    # Varyant görevlerinde orijinal zamanlamaları koru
     reuse_cues = os.path.join(task_dir, "subtitle_cues.json")
     parent = task.get("parent_task_id")
     if parent and task.get("regenerate_mode") in ("visuals", "subtitles"):
@@ -129,6 +129,7 @@ def _run_task(task_id: str):
             voice_rate=float(task.get("voice_rate") or 1.0),
             voice_volume=float(task.get("voice_volume") or 1.0),
             aspect=aspect,
+            resolution=resolution,
             bg_style=bg_style,
             pexels_query=pexels_query,
             custom_bg_media=task.get("custom_bg_media"),
@@ -139,6 +140,9 @@ def _run_task(task_id: str):
             sub_pos=task.get("sub_pos", "bottom"),
             sub_size=int(task.get("sub_size") or 18),
             sub_box=bool(task.get("sub_box", False)),
+            sub_bold=bool(task.get("sub_bold", True)),
+            sub_font=task.get("sub_font", "Roboto"),
+            outline_color=task.get("outline_color", "#000000"),
             bgm_path=task.get("bgm_path"),
             bgm_mode=task.get("bgm_mode", "none"),
             bgm_volume=float(task.get("bgm_volume") or 0.15),
@@ -204,7 +208,6 @@ def _worker_loop():
             finally:
                 setattr(_thread, "running_task_id", None)
                 CANCEL_FLAGS.discard(tid)
-        # Kuyruktaki isler bitene kadar dongu; bosalinca tekrar bekle.
 
 
 def start_worker():
