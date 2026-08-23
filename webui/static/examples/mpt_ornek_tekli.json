@@ -1,0 +1,8 @@
+{
+    "_aciklama": "Tekli uretim icin ornek. Bu dosyayi baz alip kendi iceriginizi yazin. WebUI'da 'Direkt JSON Girdisi' kutusuna yapistirip 'Forma Doldur' ile kullanabilirsiniz.",
+    "video_subject": "KPSS Matematik - Üslü Sayılar",
+    "video_script": "Üslü sayılarda tabanlar aynı olduğunda çarpma işleminde üsler toplanır. Örneğin iki üzeri üç çarpı iki üzeri iki, iki üzeri beşe eşittir.",
+    "video_terms": ["math", "blackboard", "study", "notebook"],
+    "voice": "tr-TR-AhmetNeural",
+    "aspect": "9:16"
+}

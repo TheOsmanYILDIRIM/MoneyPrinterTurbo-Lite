@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MoneyPrinter Lite Studio</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="container">
+    <header>
+        <h1>⚡ MoneyPrinter <span class="badge">Lite Studio</span></h1>
+        <div id="server-status" class="server-ok">● Yerel Sunucu</div>
+    </header>
+
+    <nav class="tabs">
+        <button class="tab-btn active" data-tab="tab-create">📝 Tekli</button>
+        <button class="tab-btn" data-tab="tab-batch">📚 Toplu</button>
+        <button class="tab-btn" data-tab="tab-history">📁 Galeri (<span id="task-count">0</span>)</button>
+        <button class="tab-btn" data-tab="tab-settings">⚙️ Ayarlar</button>
+    </nav>
+
+    <!-- TEKLİ -->
+    <section id="tab-create" class="card">
+        <div class="section-title">📝 Script & Başlık</div>
+        <label for="subject">Ders / Konu Başlığı</label>
+        <input type="text" id="subject" placeholder="Örn: KPSS Matematik - Basit Eşitsizlikler">
+
+        <label for="script">Ders Scripti (Anlatım Metni)</label>
+        <textarea id="script" placeholder="Ders anlatım scriptinizi buraya yapıştırın..."></textarea>
+        <div class="meta-info">
+            <span id="char-count">Karakter: 0 | Kelime: 0</span>
+            <span class="accent">✓ Doğrudan Script Modu</span>
+        </div>
+
+        <label for="pexels_query">Anahtar Kelimeler (Pexels araması, virgülle)</label>
+        <input type="text" id="pexels_query" placeholder="math, blackboard, study">
+
+        <details class="mt6">
+            <summary>🤖 AI ile Script Üret (opsiyonel)</summary>
+            <div class="grid-2">
+                <div>
+                    <label for="ai_provider">Sağlayıcı</label>
+                    <select id="ai_provider" onchange="loadModels()"><option value="">Yükleniyor...</option></select>
+                </div>
+                <div>
+                    <label for="ai_model">Model</label>
+                    <select id="ai_model"><option value="">Önce sağlayıcı seç</option></select>
+                </div>
+            </div>
+            <div class="grid-2">
+                <div>
+                    <label for="ai_paragraphs">Paragraf Sayısı</label>
+                    <select id="ai_paragraphs">
+                        <option value="1">1</option><option value="2">2</option>
+                        <option value="3" selected>3</option><option value="4">4</option>
+                        <option value="5">5</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="ai_gen_terms_chk">Anahtar Kelime Üret</label>
+                    <label class="switch-row"><input type="checkbox" id="ai_gen_terms_chk" checked> Evet</label>
+                </div>
+            </div>
+            <label for="ai_extra">Ek Talimat (isteğe bağlı)</label>
+            <input type="text" id="ai_extra" placeholder="Örn: KPSS sınavına uygun, örneklerle anlat">
+            <button class="btn-submit blue mt6" id="btn-ai-generate" style="margin-top:10px;">✨ Script Üret</button>
+        </details>
+
+        <details class="mt6">
+            <summary>📋 Direkt JSON Girdisi</summary>
+            <p class="hint">JSON yapıştırıp "Forma Doldur" ile alanları otomatik doldurabilirsin. Alanlar:
+                <code>{subject|video_subject, script|video_script, keywords|video_terms}</code></p>
+            <textarea id="json_input" style="min-height:90px; font-family:monospace; font-size:.78rem"
+                      placeholder='{"video_subject": "Üslü Sayılar", "video_script": "...", "video_terms": ["math","study"]}'></textarea>
+            <button class="btn-sm btn-copy mt6" id="btn-json-fill" style="margin-top:8px;">➡️ Forma Doldur</button>
+            <a class="btn-sm btn-copy" style="margin-top:8px;" href="/static/examples/mpt_ornek_tekli.json" download="mpt_ornek_tekli.json">⬇️ Örnek JSON İndir</a>
+        </details>
+
+        <div class="hint">🎙️ Ses, 🎨 arka plan, 📝 altyazı ve 🎵 müzik ayarları için
+            <b>Ayarlar → 🎬 Üretim Tercihleri</b> sekmesini kullanın.</div>
+
+        <div class="section-title">📎 Bu Videoya Özel Dosyalar</div>
+        <label for="bg_file">Arka Plan Dosyası (Resim / Video) — opsiyonel</label>
+        <input type="file" id="bg_file" accept="image/*,video/*">
+        <label for="audio_file">Hazır Ses Dosyası (TTS atlanır) — opsiyonel</label>
+        <input type="file" id="audio_file" accept="audio/*">
+        <label for="bgm_file">Müzik Dosyası — opsiyonel</label>
+        <input type="file" id="bgm_file" accept="audio/*">
+
+        <button class="btn-submit" id="btn-submit">🚀 Video Üret</button>
+    </section>
+
+    <!-- TOPLU -->
+    <section id="tab-batch" class="card hidden">
+        <div class="section-title">📚 Toplu Script Otomasyonu</div>
+        <p class="hint">Dersleri <code>---</code> ile ayırın; her derse <code># Başlık</code> ve
+            <code>Keywords: k1, k2</code> ekleyebilirsiniz. Ya da direkt JSON yapıştırın:
+            dizi biçiminde <code>[{"video_subject": "...", "video_script": "...", "video_terms": [...]}]</code>
+            (alan adları: subject/script/keywords da kabul edilir).</p>
+        <div class="flex-row" style="gap:6px;">
+            <a class="btn-sm btn-copy" href="/static/examples/mpt_ornek_toplu.json" download="mpt_ornek_toplu.json">⬇️ Örnek JSON İndir</a>
+            <button class="btn-sm btn-copy" id="btn-batch-example-fill">📋 Örneği Kutuya Doldur</button>
+        </div>
+
+        <label for="batch_file_upload">Dosya Yükle (.txt / .json / .md)</label>
+        <input type="file" id="batch_file_upload" accept=".txt,.json,.md">
+
+        <label for="batch_text">Çoklu Script Metinleri</label>
+        <textarea id="batch_text" style="min-height:160px"
+                  placeholder="# Ders 1: Üslü Sayılar&#10;Keywords: math, study&#10;Üslü sayılarda...&#10;---&#10;# Ders 2: Köklü Sayılar&#10;Keywords: algebra&#10;Köklü sayılarda..."></textarea>
+        <div id="batch-preview-box" class="batch-preview"></div>
+
+        <div class="hint">⚙️ Tüm üretim ayarları (ses, format, arka plan, altyazı, müzik, geçiş)
+            <b>Ayarlar → 🎬 Üretim Tercihleri</b> sekmesinden alınır.</div>
+
+        <button class="btn-submit blue" id="btn-batch-submit">⚡ Toplu Üretimi Başlat</button>
+    </section>
+
+    <!-- GALERİ -->
+    <section id="tab-history" class="card hidden">
+        <div id="tasks-container">
+            <div class="empty-state">Yükleniyor...</div>
+        </div>
+    </section>
+
+    <!-- AYARLAR -->
+    <section id="tab-settings" class="card hidden">
+        <div class="section-title">🎬 Üretim Tercihleri <span class="muted small">(Tüm videolar için global)</span></div>
+        <p class="hint">Buradaki ayarlar Tekli ve Toplu üretimde kullanılır. Kaydetmeyi unutmayın.</p>
+
+        <div class="section-title">🎙️ Seslendirme</div>
+        <div class="flex-row" style="justify-content:space-between;">
+            <label style="margin:0;">Seçili Ses: <strong id="selected-voice-display" class="accent"></strong></label>
+            <button class="btn-sm btn-copy" id="btn-voice-preview" title="Seçili sesi dinle">🔊 Örnek Dinle</button>
+        </div>
+        <input type="hidden" id="voice" value="tr-TR-AhmetNeural">
+        <div class="voice-box">
+            <input type="text" id="voice-search" placeholder="🔍 Ses ara (Ahmet, tr, en, Female...)">
+            <div id="voice-list-container" class="voice-list"></div>
+        </div>
+        <div class="grid-2 mt6">
+            <div>
+                <label for="voice_rate">Okuma Hızı</label>
+                <select id="voice_rate">
+                    <option value="0.9">0.9x (Yavaş)</option>
+                    <option value="1.0" selected>1.0x (Normal)</option>
+                    <option value="1.15">1.15x (Akıcı)</option>
+                    <option value="1.25">1.25x (Hızlı)</option>
+                </select>
+            </div>
+            <div>
+                <label for="voice_volume">Ses Seviyesi</label>
+                <select id="voice_volume">
+                    <option value="0.8">%80</option>
+                    <option value="1.0" selected>%100</option>
+                    <option value="1.3">%130</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="grid-2 mt6">
+            <div>
+                <label for="aspect">Format</label>
+                <select id="aspect">
+                    <option value="9:16">9:16 Dikey (720x1280 Shorts)</option>
+                    <option value="16:9">16:9 Yatay (1280x720 Ders)</option>
+                    <option value="1:1">1:1 Kare (720x720)</option>
+                </select>
+            </div>
+            <div>
+                <label for="bg_style">Arka Plan</label>
+                <select id="bg_style">
+                    <option value="chalkboard">📋 Yeşil Ders Tahtası</option>
+                    <option value="dark_slate">🌌 Koyu Gece Mavisi</option>
+                    <option value="warm_study">☕ Sıcak Çalışma Odası</option>
+                    <option value="midnight_purple">🟣 Gece Moru</option>
+                    <option value="pexels">🎬 Pexels HD Stok Video</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="section-title">📝 Altyazı</div>
+        <div class="grid-2">
+            <div>
+                <label for="subtitle_enabled_chk">Altyazı</label>
+                <label class="switch-row"><input type="checkbox" id="subtitle_enabled_chk" checked> Açık</label>
+            </div>
+            <div>
+                <label for="sub_pos">Konumu</label>
+                <select id="sub_pos">
+                    <option value="bottom" selected>Alt Güvenli Alan</option>
+                    <option value="center">Ekran Ortası</option>
+                    <option value="top">Üst Kısım</option>
+                </select>
+            </div>
+        </div>
+        <div class="grid-2 mt6">
+            <div>
+                <label for="sub_color">Rengi</label>
+                <select id="sub_color">
+                    <option value="#FFFFFF" selected>⚪ Parlak Beyaz</option>
+                    <option value="#FFD700">🟡 Altın Sarısı</option>
+                    <option value="#38BDF8">🔵 Canlı Mavi</option>
+                    <option value="#4ADE80">🟢 Yeşil</option>
+                </select>
+            </div>
+            <div>
+                <label for="sub_size">Boyutu</label>
+                <select id="sub_size">
+                    <option value="14">Küçük</option>
+                    <option value="18" selected>Normal</option>
+                    <option value="22">Büyük</option>
+                    <option value="28">Çok Büyük</option>
+                </select>
+            </div>
+        </div>
+        <div class="grid-2 mt6">
+            <div>
+                <label for="sub_box">Okunabilirlik</label>
+                <select id="sub_box">
+                    <option value="false" selected>Düz (kontur)</option>
+                    <option value="true">Yarı saydam kutu</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="section-title">🎵 Müzik</div>
+        <div class="grid-2">
+            <div>
+                <label for="bgm_source">Müzik Kaynağı</label>
+                <select id="bgm_source">
+                    <option value="none" selected>🚫 Yok</option>
+                    <option value="random">🎲 Rastgele (songs klasörü)</option>
+                </select>
+            </div>
+            <div>
+                <label for="bgm_volume">Müzik Seviyesi</label>
+                <select id="bgm_volume">
+                    <option value="0.08">%8 (Fısıltı)</option>
+                    <option value="0.15" selected>%15 (Hafif)</option>
+                    <option value="0.30">%30 (Belirgin)</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="section-title">🎞️ Klip Geçiş Efekti</div>
+        <div class="grid-2">
+            <div>
+                <label for="prod_transition">Geçiş</label>
+                <select id="prod_transition">
+                    <option value="none" selected>Yok (sert kesim)</option>
+                    <option value="crossfade">Crossfade (yumuşak)</option>
+                </select>
+            </div>
+            <div>
+                <label for="prod_transition_dur">Süre (sn)</label>
+                <select id="prod_transition_dur">
+                    <option value="0.3">0.3</option>
+                    <option value="0.5" selected>0.5</option>
+                    <option value="0.8">0.8</option>
+                    <option value="1.0">1.0</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="section-title">🔐 Erişim Bağlantısı</div>
+        <p class="hint">Sunucuya bu bağlantıyla girilir (token içerir):</p>
+        <div class="link-row"><input type="text" id="auth-link" readonly><button class="btn-sm btn-copy" data-copy="auth-link">Kopyala</button></div>
+
+        <div class="section-title">🎬 Stok Video Anahtarları</div>
+        <label for="set_pexels">Pexels API Key</label>
+        <input type="password" id="set_pexels" autocomplete="off">
+        <label for="set_pixabay">Pixabay API Key</label>
+        <input type="password" id="set_pixabay" autocomplete="off">
+
+        <div class="section-title">🤖 LLM Anahtarları</div>
+        <div class="grid-2">
+            <div><label for="set_openai">OpenAI</label><input type="password" id="set_openai" placeholder="sk-..." autocomplete="off"></div>
+            <div><label for="set_gemini">Gemini</label><input type="password" id="set_gemini" placeholder="AIza..." autocomplete="off"></div>
+        </div>
+        <div class="grid-2">
+            <div><label for="set_groq">Groq</label><input type="password" id="set_groq" placeholder="gsk_..." autocomplete="off"></div>
+            <div><label for="set_deepseek">DeepSeek</label><input type="password" id="set_deepseek" placeholder="sk-..." autocomplete="off"></div>
+        </div>
+
+        <div class="section-title">🎙️ TTS Anahtarları</div>
+        <div class="grid-2">
+            <div><label for="set_azure_key">Azure Speech Key</label><input type="password" id="set_azure_key" autocomplete="off"></div>
+            <div><label for="set_azure_reg">Azure Region</label><input type="text" id="set_azure_reg" placeholder="eastus"></div>
+        </div>
+        <label for="set_elevenlabs">ElevenLabs Key</label>
+        <input type="password" id="set_elevenlabs" autocomplete="off">
+
+        <div class="section-title">🎵 Müzik Kütüphanesi</div>
+        <p class="hint">Buraya eklenen müzikler "🎲 Rastgele" seçeneğinde kullanılır.</p>
+        <div class="link-row">
+            <input type="file" id="song_files" multiple accept=".mp3,.m4a,.aac,.wav,.flac,.ogg,.opus">
+            <button class="btn-sm btn-copy" id="btn-upload-songs">⬆️ Ekle</button>
+        </div>
+        <div id="songs-list" class="songs-list mt6"><span class="muted small">Yükleniyor...</span></div>
+
+        <div class="section-title">🌐 Tunnel (Uzaktan Erişim)</div>
+        <label for="set_ngrok">Ngrok Authtoken</label>
+        <input type="password" id="set_ngrok" autocomplete="off">
+        <div class="grid-2 mt6">
+            <button class="btn-sm btn-tunnel" id="btn-tunnel-start">🌍 Tunnel Başlat</button>
+            <div id="tunnel-status" class="small muted" style="align-self:center;"></div>
+        </div>
+
+        <div class="flex-row mt12">
+            <label class="switch-row inline"><input type="checkbox" id="toggle_key_visibility"> 👁️ Anahtarları göster</label>
+        </div>
+        <button class="btn-submit green" id="btn-save-settings">💾 Ayarları Kaydet</button>
+    </section>
+</div>
+
+<!-- Varyant (ses / görüntü / altyazı) üretim modalı -->
+<div id="variant-modal" class="modal hidden">
+    <div class="modal-box">
+        <div class="modal-title" id="vm-title">Varyant Üret</div>
+        <div id="vm-body"></div>
+        <div class="modal-actions">
+            <button class="btn-sm" id="vm-cancel">İptal</button>
+            <button class="btn-sm btn-submit" id="vm-apply">Üret</button>
+        </div>
+    </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

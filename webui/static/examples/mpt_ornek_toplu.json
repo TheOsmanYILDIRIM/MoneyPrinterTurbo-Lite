@@ -1,0 +1,18 @@
+[
+    {
+        "_aciklama": "Toplu uretim icin ornek dizi. Her nesne bir dersi temsil eder; bu nesneyi baz alip cogaltabilirsiniz. 'Toplu' sekmesindeki metin kutusuna direkt yapistirabilirsiniz.",
+        "video_subject": "1. Ders: Üslü Sayılar",
+        "video_script": "Üslü sayılarda tabanlar aynı olduğunda çarpma işleminde üsler toplanır.",
+        "video_terms": ["math", "blackboard", "calculation"]
+    },
+    {
+        "video_subject": "2. Ders: Köklü Sayılar",
+        "video_script": "Kök dereceleri aynı olan köklü sayılar tek kök içinde çarpılır.",
+        "video_terms": ["algebra", "formula", "school"]
+    },
+    {
+        "video_subject": "3. Ders: Basit Eşitsizlikler",
+        "video_script": "Eşitsizliğin her iki tarafı negatif bir sayı ile çarpılırsa eşitsizlik yön değiştirir.",
+        "video_terms": ["algebra", "studying", "desk"]
+    }
+]
