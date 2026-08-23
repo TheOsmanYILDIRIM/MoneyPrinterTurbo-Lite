@@ -278,6 +278,39 @@ def _download_pexels_clip(url: str, output_path: str, w: int, h: int, timeout: i
         return False
 
 
+def select_best_pexels_file(video_files: list, target_w: int, target_h: int) -> Optional[str]:
+    """Pexels video dosyaları arasından seçilen çözünürlüğe (4K, 2K, 1080p, 720p) en uygun olanı seçer."""
+    if not video_files:
+        return None
+
+    target_pixels = target_w * target_h
+    best_file = None
+    best_diff = float("inf")
+
+    # Öncelik 1: Hedef çözünürlüğü karşılayan veya ona en yakın olan
+    for vf in video_files:
+        vw = vf.get("width") or 0
+        vh = vf.get("height") or 0
+        link = vf.get("link")
+        if not link or vw <= 0 or vh <= 0:
+            continue
+
+        pixels = vw * vh
+        diff = abs(pixels - target_pixels)
+        if diff < best_diff:
+            best_diff = diff
+            best_file = vf
+
+    if best_file and best_file.get("link"):
+        return best_file.get("link")
+
+    # Fallback: uhd/hd veya ilk link
+    for vf in video_files:
+        if vf.get("quality") in ("uhd", "hd") and vf.get("link"):
+            return vf.get("link")
+    return video_files[0].get("link") if video_files else None
+
+
 def fetch_pexels_clips(query: str, orientation: str = "portrait", outdir: str = ".",
                        w: int = 720, h: int = 1280, max_clips: int = 6) -> List[str]:
     """Çoklu sahne arama terimleri varsa her biri için ayrı video arar ve indirir.
@@ -315,17 +348,7 @@ def fetch_pexels_clips(query: str, orientation: str = "portrait", outdir: str = 
                 seen_ids.add(vid_id)
                 video_files = video.get("video_files", [])
 
-                best_url = None
-                for vf in video_files:
-                    vw, vh = vf.get("width", 0), vf.get("height", 0)
-                    if (w >= 1080 or h >= 1080) and (vf.get("quality") == "hd" or vw >= 1080 or vh >= 1080):
-                        best_url = vf.get("link")
-                        break
-                    elif vw == 720 or vh == 1280 or vf.get("quality") == "hd":
-                        best_url = vf.get("link")
-                        break
-                if not best_url and video_files:
-                    best_url = video_files[0].get("link")
+                best_url = select_best_pexels_file(video_files, w, h)
                 if not best_url:
                     continue
 
@@ -350,7 +373,7 @@ def fetch_pexels_clips(query: str, orientation: str = "portrait", outdir: str = 
                 if len(clips) >= max_clips:
                     break
                 video_files = video.get("video_files", [])
-                best_url = video_files[0].get("link") if video_files else None
+                best_url = select_best_pexels_file(video_files, w, h)
                 if best_url:
                     out_path = os.path.join(outdir, f"pexels_{len(clips)}.mp4")
                     if _download_pexels_clip(best_url, out_path, w, h):
