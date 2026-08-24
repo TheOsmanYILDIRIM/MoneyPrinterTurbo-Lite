@@ -34,6 +34,20 @@ _active_ffmpeg: dict = {}
 _ENCODER_CONFIG: Optional[dict] = None
 
 
+def get_ffmpeg_binary() -> str:
+    """Sistemdeki en uygun FFmpeg çalıştırılabilir dosyasını bulur."""
+    candidates = [
+        "/usr/local/bin/ffmpeg",
+        shutil.which("ffmpeg"),
+        "/usr/bin/ffmpeg",
+        "/data/data/com.termux/files/usr/bin/ffmpeg"
+    ]
+    for cand in candidates:
+        if cand and os.path.exists(cand) and os.access(cand, os.X_OK):
+            return cand
+    return "ffmpeg"
+
+
 def get_video_encoder_config() -> dict:
     """
     Sistemdeki donanım hızlandırmayı (NVIDIA GPU NVENC, Apple VideoToolbox, VAAPI vb.)
@@ -44,12 +58,14 @@ def get_video_encoder_config() -> dict:
     if _ENCODER_CONFIG is not None:
         return _ENCODER_CONFIG
 
+    ffmpeg_bin = get_ffmpeg_binary()
+
     # 1. NVIDIA GPU NVENC Kontrolü (Google Colab GPU, Linux NVIDIA)
     try:
         res = subprocess.run(
-            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "nullsrc=s=64x64:d=0.1",
+            [ffmpeg_bin, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "nullsrc=s=64x64:d=0.1",
              "-c:v", "h264_nvenc", "-f", "null", "-"],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=2.5
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=3.0
         )
         if res.returncode == 0:
             logger.success("🚀 NVIDIA GPU Donanım Hızlandırma Algılandı! (h264_nvenc aktif - GPU Hızlandırmalı Render)")
@@ -60,13 +76,16 @@ def get_video_encoder_config() -> dict:
                 "fast_args": ["-c:v", "h264_nvenc", "-preset", "p1", "-cq", "24"]
             }
             return _ENCODER_CONFIG
-    except Exception:
-        pass
+        else:
+            if shutil.which("nvidia-smi") or os.path.exists("/usr/bin/nvidia-smi"):
+                logger.warning(f"NVIDIA GPU mevcut fakat FFmpeg NVENC kontrolü başarısız oldu (rc={res.returncode}): {res.stderr.strip()[:150]}")
+    except Exception as e:
+        logger.debug(f"NVENC kontrolü sırasında hata: {e}")
 
     # 2. Apple Silicon VideoToolbox Kontrolü (macOS)
     try:
         res = subprocess.run(
-            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "nullsrc=s=64x64:d=0.1",
+            [ffmpeg_bin, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "nullsrc=s=64x64:d=0.1",
              "-c:v", "h264_videotoolbox", "-f", "null", "-"],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=2.0
         )
@@ -433,7 +452,7 @@ def _download_pexels_clip(url: str, output_path: str, w: int, h: int, timeout: i
         # Hedef çözünürlüğe ölçekle
         encoder_cfg = get_video_encoder_config()
         cmd = [
-            "ffmpeg", "-y", "-i", tmp_path,
+            get_ffmpeg_binary(), "-y", "-i", tmp_path,
             "-vf", f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1,fps=30,format=yuv420p"
         ] + encoder_cfg["fast_args"] + [
             "-an",
@@ -634,7 +653,7 @@ def build_cycling_background(clips: List[str], target_duration: float,
 
     encoder_cfg = get_video_encoder_config()
     cmd = [
-        "ffmpeg", "-y"
+        get_ffmpeg_binary(), "-y"
     ] + inputs + [
         "-filter_complex", filter_chain,
         "-map", map_out
@@ -656,7 +675,7 @@ def build_cycling_background(clips: List[str], target_duration: float,
             concat_filter += f"concat=n={len(ordered)}:v=1[cv]"
             fb_chain = ";".join(concat_fparts) + ";" + concat_filter
             fb_cmd = [
-                "ffmpeg", "-y"
+                get_ffmpeg_binary(), "-y"
             ] + inputs + [
                 "-filter_complex", fb_chain,
                 "-map", "[cv]"
@@ -870,7 +889,7 @@ def render_video_ffmpeg(
 
     vf_str = ",".join(vf_filters)
 
-    cmd = ["ffmpeg", "-y"]
+    cmd = [get_ffmpeg_binary(), "-y"]
     if is_video_bg:
         cmd.extend(["-stream_loop", "-1", "-i", rel_bg])
     else:
@@ -928,7 +947,7 @@ def render_video_ffmpeg(
     if returncode != 0:
         logger.warning(f"FFmpeg render fallback tetikleniyor (rc={returncode})")
         fb_cmd = [
-            "ffmpeg", "-y",
+            get_ffmpeg_binary(), "-y",
             "-loop", "1", "-i", rel_bg,
             "-i", rel_audio,
             "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac",
