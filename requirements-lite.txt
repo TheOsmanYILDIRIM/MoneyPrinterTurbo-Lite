@@ -2,7 +2,7 @@
 edge_tts>=7.2.7
 starlette>=0.46.0
 uvicorn>=0.32.0
-requests>=2.33.0
+requests>=2.31.0
 loguru>=0.7.3
 pillow>=11.0.0
 
