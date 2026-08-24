@@ -36,6 +36,23 @@ def _save_db(data: Dict[str, dict]):
             print(f"Hata task_store save: {e}")
 
 
+def migrate_legacy_batches():
+    with _lock:
+        tasks = _load_db()
+        changed = False
+        legacy_clusters = {}
+        for tid, t in tasks.items():
+            if not t.get("batch_id") and t.get("batch_total"):
+                c_time = int(t.get("created_at", 0))
+                bucket = (c_time // 120, t.get("batch_total"))
+                if bucket not in legacy_clusters:
+                    legacy_clusters[bucket] = f"batch_legacy_{bucket[0]}_{bucket[1]}"
+                t["batch_id"] = legacy_clusters[bucket]
+                changed = True
+        if changed:
+            _save_db(tasks)
+
+
 def create_task(task_id: str, subject: str = "Ders", script: str = "", voice: str = "tr-TR-AhmetNeural",
                 aspect: str = "9:16", resolution: str = "720p", bg_style: str = "chalkboard", pexels_query: str = "",
                 voice_rate: float = 1.0, voice_volume: float = 1.0,
@@ -49,6 +66,7 @@ def create_task(task_id: str, subject: str = "Ders", script: str = "", voice: st
                 bgm_volume: float = 0.15,
                 transition: str = "none",
                 transition_dur: float = 0.5,
+                batch_id: Optional[str] = None,
                 batch_index: Optional[int] = None,
                 batch_total: Optional[int] = None,
                 highlight_words: Optional[any] = None,
@@ -58,6 +76,7 @@ def create_task(task_id: str, subject: str = "Ders", script: str = "", voice: st
     tasks = _load_db()
     task = {
         "task_id": task_id,
+        "batch_id": batch_id or kwargs.get("batch_id"),
         "created_at": time.time(),
         "created_at_str": time.strftime("%Y-%m-%d %H:%M:%S"),
         "subject": subject,
@@ -216,4 +235,21 @@ def delete_all_tasks() -> int:
                     pass
         _save_db(tasks)
         return count
+
+
+def delete_batch(batch_id: str) -> int:
+    """Belirli bir batch_id'ye ait tüm görevleri ve dosyalarını siler."""
+    with _lock:
+        tasks = _load_db()
+        matching_ids = [tid for tid, t in tasks.items() if t.get("batch_id") == batch_id]
+        for tid in matching_ids:
+            delete_task(tid)
+        return len(matching_ids)
+
+
+def get_tasks_by_batch(batch_id: str) -> List[dict]:
+    """Belirli bir batch_id'ye ait tüm görevleri sıralı döndürür."""
+    tasks = _load_db()
+    batch_tasks = [t for t in tasks.values() if t.get("batch_id") == batch_id]
+    return sorted(batch_tasks, key=lambda x: (x.get("batch_index") or 0, x.get("created_at", 0)))
 

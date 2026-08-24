@@ -127,11 +127,120 @@ function updateSelectedVoiceDisplay(voiceId, name) {
     el("selected-voice-display").textContent = voiceId + (name ? ` (${name})` : "");
 }
 
+let selectedBatchVoices = [];
+
+function toggleBatchVoiceMode() {
+    const isPool = el("batch_vmode_pool") && el("batch_vmode_pool").checked;
+    const box = el("batch-voice-pool-box");
+    if (box) box.classList.toggle("hidden", !isPool);
+    if (isPool) {
+        if (selectedBatchVoices.length === 0) {
+            selectTurkishBatchVoices();
+        } else {
+            renderBatchVoiceList(allVoicesList);
+            updateBatchVoiceChips();
+        }
+    }
+}
+
+function renderBatchVoiceList(voices) {
+    const container = el("batch-voice-list-container");
+    if (!container) return;
+    clearNode(container);
+
+    const sorted = [...(voices || allVoicesList)].sort((a, b) => {
+        const at = (a.locale || "").startsWith("tr") ? 0 : 1;
+        const bt = (b.locale || "").startsWith("tr") ? 0 : 1;
+        return at - bt || String(a.id).localeCompare(String(b.id));
+    });
+
+    sorted.slice(0, 150).forEach(v => {
+        const isSel = selectedBatchVoices.includes(v.id);
+        const row = make("div", "voice-item-multi" + (isSel ? " selected" : ""));
+        const left = make("span", null, null);
+        left.appendChild(make("span", null, (isSel ? "☑️ " : "⬜ ") + flagFor(v.locale) + " " + v.id));
+        row.appendChild(left);
+        row.appendChild(make("span", "v-meta", (v.gender || "") + " " + (v.name ? "· " + v.name : "")));
+        row.addEventListener("click", () => toggleBatchVoiceSelection(v.id));
+        container.appendChild(row);
+    });
+
+    if (!sorted.length) {
+        container.appendChild(make("div", "empty-state", "Ses bulunamadı."));
+    }
+}
+
+function filterBatchVoiceList() {
+    const q = (el("batch-voice-search") ? el("batch-voice-search").value : "").toLowerCase().trim();
+    if (!q) { renderBatchVoiceList(allVoicesList); return; }
+    renderBatchVoiceList(allVoicesList.filter(v =>
+        String(v.id || "").toLowerCase().includes(q) ||
+        String(v.name || "").toLowerCase().includes(q) ||
+        String(v.locale || "").toLowerCase().includes(q) ||
+        String(v.gender || "").toLowerCase().includes(q)
+    ));
+}
+
+function toggleBatchVoiceSelection(voiceId) {
+    const idx = selectedBatchVoices.indexOf(voiceId);
+    if (idx >= 0) {
+        selectedBatchVoices.splice(idx, 1);
+    } else {
+        selectedBatchVoices.push(voiceId);
+    }
+    updateBatchVoiceChips();
+    filterBatchVoiceList();
+}
+
+function updateBatchVoiceChips() {
+    const countEl = el("batch-selected-count");
+    if (countEl) countEl.textContent = selectedBatchVoices.length;
+    const chipsEl = el("batch-voice-chips");
+    if (!chipsEl) return;
+    clearNode(chipsEl);
+
+    if (selectedBatchVoices.length === 0) {
+        chipsEl.appendChild(make("span", "small muted", "Henüz ses seçilmedi. Aşağıdaki listeden sesleri seçin."));
+        return;
+    }
+
+    selectedBatchVoices.forEach(vid => {
+        const vObj = allVoicesList.find(x => x.id === vid);
+        const flag = flagFor(vObj ? vObj.locale : "");
+        const chip = make("span", "batch-voice-chip");
+        chip.appendChild(make("span", null, `${flag} ${vid}`));
+        const del = make("span", "chip-del", "✕");
+        del.title = "Kaldır";
+        del.addEventListener("click", (e) => {
+            e.stopPropagation();
+            toggleBatchVoiceSelection(vid);
+        });
+        chip.appendChild(del);
+        chipsEl.appendChild(chip);
+    });
+}
+
+function selectTurkishBatchVoices() {
+    const trVoices = allVoicesList.filter(v => (v.locale || "").startsWith("tr") || String(v.id).startsWith("tr-"));
+    trVoices.forEach(v => {
+        if (!selectedBatchVoices.includes(v.id)) selectedBatchVoices.push(v.id);
+    });
+    updateBatchVoiceChips();
+    filterBatchVoiceList();
+}
+
+function clearBatchVoices() {
+    selectedBatchVoices = [];
+    updateBatchVoiceChips();
+    filterBatchVoiceList();
+}
+
 async function loadVoices() {
     try {
         const data = await api("/api/voices");
         allVoicesList = data.voices || [];
         filterVoiceList();
+        filterBatchVoiceList();
     } catch (e) { console.error(e); }
 }
 
@@ -235,13 +344,18 @@ function updateBatchPreview() {
                 const subject = low.subject || low.video_subject || low.title || `Kayıt ${i + 1}`;
                 const script = low.script || low.video_script || low.text || "";
                 const kw = low.pexels_query || low.video_terms || low.keywords || low.terms || "";
+                const v = low.voice || low.ses || low.speaker || "";
                 const item = make("div", "batch-item-tag");
                 const head = make("div");
                 head.style.cssText = "display:flex;justify-content:space-between;";
                 head.appendChild(make("span", "accent", `${i + 1}. ${subject}`));
                 head.appendChild(make("span", "muted", `${script.length} krk`));
                 item.appendChild(head);
-                if (kw) item.appendChild(make("div", "kw-badge", "🏷️ " + kw));
+                const badges = make("div", null, null);
+                badges.style.cssText = "display:flex; gap:4px; flex-wrap:wrap; margin-top:2px;";
+                if (kw) badges.appendChild(make("span", "kw-badge", "🏷️ " + kw));
+                if (v) badges.appendChild(make("span", "kw-badge", "🎙️ " + v));
+                if (badges.children.length) item.appendChild(badges);
                 box.appendChild(item);
             });
             return;
@@ -259,10 +373,13 @@ function updateBatchPreview() {
         const lines = b.split("\n").map(l => l.trim()).filter(Boolean);
         let title = `Ders ${i + 1}`;
         let kw = "";
+        let vname = "";
         lines.forEach(line => {
             if (line.startsWith("#")) title = line.replace(/^#+\s*/, "").trim();
             const m = line.match(/^(keywords|etiketler|anahtar kelimeler|terms|tags)\s*:\s*(.+)/i);
             if (m) kw = m[2].trim();
+            const mv = line.match(/^(ses|voice|seslendirmen|speaker)\s*:\s*(.+)/i);
+            if (mv) vname = mv[2].trim();
         });
         const item = make("div", "batch-item-tag");
         const head = make("div");
@@ -270,7 +387,11 @@ function updateBatchPreview() {
         head.appendChild(make("span", "accent", `${i + 1}. ${title}`));
         head.appendChild(make("span", "muted", `${b.length} krk`));
         item.appendChild(head);
-        if (kw) item.appendChild(make("div", "kw-badge", "🏷️ " + kw));
+        const badges = make("div", null, null);
+        badges.style.cssText = "display:flex; gap:4px; flex-wrap:wrap; margin-top:2px;";
+        if (kw) badges.appendChild(make("span", "kw-badge", "🏷️ " + kw));
+        if (vname) badges.appendChild(make("span", "kw-badge", "🎙️ " + vname));
+        if (badges.children.length) item.appendChild(badges);
         box.appendChild(item);
     });
 }
@@ -296,6 +417,12 @@ async function submitBatch() {
 
     const fd = new FormData();
     Object.entries(collectCommonParams("batch")).forEach(([k, v]) => fd.append(k, v));
+
+    // Çoklu ses havuzu kontrolü
+    const isPool = el("batch_vmode_pool") && el("batch_vmode_pool").checked;
+    if (isPool && selectedBatchVoices.length > 0) {
+        fd.set("voices", selectedBatchVoices.join(","));
+    }
 
     try {
         const data = await api("/api/batch", { method: "POST", body: fd });
@@ -612,6 +739,27 @@ async function applyVariant() {
     }
 }
 
+let collapsedBatches = new Set();
+
+function downloadBatchZip(batchId) {
+    if (!batchId) return;
+    window.location.href = `/api/tasks/download-zip?batch_id=${encodeURIComponent(batchId)}`;
+}
+
+function downloadAllVideosZip() {
+    window.location.href = `/api/tasks/download-zip?all=1`;
+}
+
+async function deleteBatch(batchId) {
+    if (!confirm("Bu toplu gruptaki tüm videoları ve görevleri silmek istiyor musunuz?")) return;
+    try {
+        await api(`/api/batches/${encodeURIComponent(batchId)}`, { method: "DELETE" });
+        loadTasks();
+    } catch (e) {
+        alert("Silme hatası: " + e.message);
+    }
+}
+
 async function loadTasks() {
     // Video oynatilirken arka plan guncellemesi yapma (oynatmayi bozmasin)
     const playing = [...document.querySelectorAll("#tasks-container video")]
@@ -631,44 +779,160 @@ async function loadTasks() {
     el("task-count").textContent = tasks.length;
 
     const container = el("tasks-container");
-    const existing = {};
-    container.querySelectorAll(".task-card").forEach(c => { existing[c.dataset.tid] = c; });
+    clearNode(container);
 
-    let prevNode = null;
-    let addedOrChanged = false;
-    tasks.forEach(t => {
-        const sig = [t.state, t.progress, t.step_text || "", t.queue_position,
-                     t.error || "", t.file_size_mb ?? ""].join("|");
-        const old = existing[t.task_id];
-        if (old && old.dataset.sig === sig) {
-            delete existing[t.task_id];
-            prevNode = old;
-            return; // degismedi -> dokunma (video oynatma durumu korunur)
-        }
-        const card = taskCard(t);
-        card.dataset.tid = t.task_id;
-        card.dataset.sig = sig;
-        delete existing[t.task_id];
-        if (old) {
-            old.replaceWith(card);      // yerinde degistir
-        } else if (prevNode) {
-            prevNode.after(card);       // dogru siraya ekle
-        } else {
-            container.prepend(card);
-        }
-        prevNode = card;
-        addedOrChanged = true;
-    });
+    if (!tasks.length) {
+        container.appendChild(make("div", "empty-state", "Henüz üretilen video bulunmuyor."));
+    } else {
+        // Toplu başlatmalara (batch_id) göre grupla
+        const groupsMap = {};
 
-    // Artik listede olmayan kartlari kaldir
-    Object.values(existing).forEach(node => node.remove());
+        tasks.forEach(t => {
+            let gid = t.batch_id;
+            if (!gid && t.batch_total) {
+                const cTime = Math.floor((t.created_at || 0) / 120);
+                gid = `batch_legacy_${cTime}_${t.batch_total}`;
+            } else if (!gid) {
+                gid = "single";
+            }
 
-    // bos durum mesaji
-    const emptyBox = container.querySelector(".empty-state");
-    if (!tasks.length && !emptyBox) {
-        container.prepend(make("div", "empty-state", "Henüz üretilen video bulunmuyor."));
-    } else if (tasks.length && emptyBox) {
-        emptyBox.remove();
+            if (!groupsMap[gid]) {
+                groupsMap[gid] = {
+                    id: gid,
+                    isSingle: gid === "single",
+                    tasks: [],
+                    completedCount: 0,
+                    processingCount: 0,
+                    failedCount: 0,
+                    latestTime: 0,
+                    earliestTime: Infinity,
+                    dateStr: ""
+                };
+            }
+            const grp = groupsMap[gid];
+            grp.tasks.push(t);
+            const ct = t.created_at || 0;
+            if (ct > grp.latestTime) grp.latestTime = ct;
+            if (ct < grp.earliestTime) {
+                grp.earliestTime = ct;
+                grp.dateStr = t.created_at_str || "";
+            }
+            if (t.state === "completed") grp.completedCount++;
+            else if (t.state === "processing" || t.state === "queued") grp.processingCount++;
+            else if (t.state === "failed" || t.state === "interrupted") grp.failedCount++;
+        });
+
+        // Grupları en yeni başlatılana göre sırala
+        const sortedGroups = Object.values(groupsMap).sort((a, b) => b.latestTime - a.latestTime);
+
+        sortedGroups.forEach(grp => {
+            // Görevleri batch_index veya created_at sırasına göre diz
+            grp.tasks.sort((a, b) => (a.batch_index || 0) - (b.batch_index || 0) || (a.created_at || 0) - (b.created_at || 0));
+
+            const isCollapsed = collapsedBatches.has(grp.id);
+            const accordion = make("div", "batch-accordion" + (isCollapsed ? "" : " open"));
+
+            // Başlık Formatı
+            let titleText = "";
+            let timeFormatted = grp.dateStr;
+            if (timeFormatted && timeFormatted.includes("-")) {
+                const parts = timeFormatted.split(" ");
+                const dPart = parts[0].split("-").reverse().join(".");
+                timeFormatted = dPart + (parts[1] ? " " + parts[1].slice(0, 5) : "");
+            }
+
+            if (grp.isSingle) {
+                titleText = `📝 Tekli Üretimler (${grp.tasks.length} Video)`;
+            } else {
+                titleText = `📚 Toplu Başlatma (${grp.tasks.length} Video) • ${timeFormatted || "Dersler"}`;
+            }
+
+            // Akordiyon Başlığı
+            const header = make("div", "batch-header");
+            const hLeft = make("div", "batch-header-left");
+
+            const toggleIcon = make("span", "batch-toggle-icon", "▶");
+            hLeft.appendChild(toggleIcon);
+
+            const infoDiv = make("div");
+            infoDiv.appendChild(make("div", "batch-title", titleText));
+
+            const metaDiv = make("div", "batch-meta");
+            const readyBadge = make("span", "batch-badge" + (grp.completedCount > 0 ? " ready" : ""),
+                `${grp.completedCount} / ${grp.tasks.length} Hazır`);
+            metaDiv.appendChild(readyBadge);
+
+            if (grp.processingCount > 0) {
+                metaDiv.appendChild(make("span", "batch-badge processing", `⏳ ${grp.processingCount} İşleniyor`));
+            }
+            if (grp.failedCount > 0) {
+                const errBadge = make("span", "batch-badge", `⚠️ ${grp.failedCount} Hata`);
+                errBadge.style.color = "#f87171";
+                metaDiv.appendChild(errBadge);
+            }
+            infoDiv.appendChild(metaDiv);
+            hLeft.appendChild(infoDiv);
+            header.appendChild(hLeft);
+
+            // Başlık Sağ Butonları (ZIP İndir & Sil)
+            const actionsDiv = make("div", "batch-actions");
+            if (grp.completedCount > 0) {
+                const zipBtn = make("button", "btn-batch-zip");
+                zipBtn.innerHTML = `📦 ZIP İndir (${grp.completedCount})`;
+                zipBtn.title = `Bu gruptaki ${grp.completedCount} tamamlanan videoyu sıkıştırmasız ZIP olarak indir`;
+                zipBtn.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    if (grp.isSingle) {
+                        const compIds = grp.tasks.filter(x => x.state === "completed").map(x => x.task_id).join(",");
+                        window.location.href = `/api/tasks/download-zip?task_ids=${encodeURIComponent(compIds)}`;
+                    } else {
+                        downloadBatchZip(grp.id);
+                    }
+                });
+                actionsDiv.appendChild(zipBtn);
+            }
+
+            const delGrpBtn = make("button", "btn-batch-del", "🗑️");
+            delGrpBtn.title = "Bu grubu ve videolarını sil";
+            delGrpBtn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                if (grp.isSingle) {
+                    if (confirm("Tekli üretimlerdeki tüm videolar silinsin mi?")) {
+                        Promise.all(grp.tasks.map(t => api("/api/tasks/" + t.task_id, { method: "DELETE" })))
+                            .then(() => loadTasks())
+                            .catch(err => alert(err.message));
+                    }
+                } else {
+                    deleteBatch(grp.id);
+                }
+            });
+            actionsDiv.appendChild(delGrpBtn);
+            header.appendChild(actionsDiv);
+
+            // Akordiyon Gövdesi
+            const body = make("div", "batch-body" + (isCollapsed ? " collapsed" : ""));
+            grp.tasks.forEach(t => {
+                const card = taskCard(t);
+                card.dataset.tid = t.task_id;
+                body.appendChild(card);
+            });
+
+            // Tıklama ile Aç / Kapa
+            header.addEventListener("click", () => {
+                const nowCollapsed = !body.classList.contains("collapsed");
+                body.classList.toggle("collapsed", nowCollapsed);
+                accordion.classList.toggle("open", !nowCollapsed);
+                if (nowCollapsed) {
+                    collapsedBatches.add(grp.id);
+                } else {
+                    collapsedBatches.delete(grp.id);
+                }
+            });
+
+            accordion.appendChild(header);
+            accordion.appendChild(body);
+            container.appendChild(accordion);
+        });
     }
 
     const hasRunning = tasks.some(t => t.state === "processing" || t.state === "queued");
@@ -708,61 +972,50 @@ async function loadAIProviders() {
 
 async function loadModels() {
     const provider = el("ai_provider").value;
-    const modelSel = el("ai_model");
-    clearNode(modelSel);
-    modelSel.appendChild(make("option", null, "Yükleniyor..."));
+    const sel = el("ai_model");
+    clearNode(sel);
     if (!provider) return;
     try {
-        const data = await api("/api/models?provider=" + encodeURIComponent(provider));
-        clearNode(modelSel);
+        const data = await api(`/api/models?provider=${provider}`);
         const models = data.models || [];
-        if (!models.length) {
-            modelSel.appendChild(make("option", null, "Model bulunamadı"));
-            return;
-        }
         models.forEach(m => {
-            const o = make("option", null, m.label && m.label !== m.id ? `${m.label} (${m.id})` : m.id);
-            o.value = m.id;
-            modelSel.appendChild(o);
+            const o = make("option", null, m);
+            o.value = m;
+            sel.appendChild(o);
         });
     } catch (e) {
-        clearNode(modelSel);
-        modelSel.appendChild(make("option", null, "Hata: " + e.message.slice(0, 40)));
+        sel.appendChild(make("option", null, "Varsayılan"));
     }
 }
 
 async function aiGenerateScript() {
     const btn = el("btn-ai-generate");
-    const provider = el("ai_provider").value;
-    const model = el("ai_model").value;
     const subject = el("subject").value.trim();
-    if (!model) { alert("Önce bir model seçin."); return; }
-    if (!subject) { alert("Önce konu başlığı girin (script bu konuya göre üretilir)."); return; }
-
+    if (!subject) { alert("Lütfen önce bir Ders / Konu Başlığı girin."); return; }
     btn.disabled = true;
-    btn.textContent = "⏳ Üretiliyor...";
+    btn.textContent = "⏳ Yazılıyor...";
     try {
         const data = await api("/api/llm/generate", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                provider: provider,
-                model: model,
-                subject: subject,
+                provider: el("ai_provider").value,
+                model: el("ai_model").value,
+                subject,
                 paragraph_number: parseInt(el("ai_paragraphs").value, 10),
-                extra_requirements: el("ai_extra").value.trim(),
+                extra_requirements: el("ai_extra").value,
                 gen_terms: el("ai_gen_terms_chk").checked
             })
         });
-        el("script").value = (data.script || "").trim();
-        updateCharCount();
+        if (data.script) {
+            el("script").value = data.script;
+            updateCharCount();
+        }
         if (data.terms && data.terms.length) {
             el("pexels_query").value = data.terms.join(", ");
         }
-    
-        alert("✅ Script üretildi ve forma dolduruldu.");
     } catch (e) {
-        alert("Script üretilemedi: " + e.message);
+        alert("Üretim hatası: " + e.message);
     } finally {
         btn.disabled = false;
         btn.textContent = "✨ Script Üret";
@@ -772,77 +1025,70 @@ async function aiGenerateScript() {
 /* ---------------- JSON girdisi ---------------- */
 
 function fillFormFromJson() {
-    let data;
+    const raw = el("json_input").value.trim();
+    if (!raw) { alert("Lütfen bir JSON metni yapıştırın."); return; }
     try {
-        data = JSON.parse(el("json_input").value);
+        let obj = JSON.parse(raw);
+        if (Array.isArray(obj)) obj = obj[0] || {};
+        const low = {};
+        Object.keys(obj).forEach(k => low[k.toLowerCase()] = obj[k]);
+        const subj = low.subject || low.video_subject || low.title || "";
+        const scr = low.script || low.video_script || low.text || "";
+        const terms = low.pexels_query || low.video_terms || low.keywords || low.terms || "";
+        if (subj) el("subject").value = subj;
+        if (scr) { el("script").value = scr; updateCharCount(); }
+        if (terms) {
+            el("pexels_query").value = Array.isArray(terms) ? terms.join(", ") : String(terms);
+        }
+        alert("✅ JSON içeriği forma aktarıldı.");
     } catch (e) {
-        alert("Geçersiz JSON: " + e.message);
-        return;
+        alert("Geçersiz JSON formatı: " + e.message);
     }
-    if (!data || typeof data !== "object" || Array.isArray(data)) {
-        alert("Tek kayıtlı bir JSON nesnesi bekleniyor.");
-        return;
-    }
-    const low = {};
-    Object.keys(data).forEach(k => low[k.toLowerCase()] =
-        typeof data[k] === "string" ? data[k] : (Array.isArray(data[k]) ? data[k].join(", ") : ""));
-    if (low.subject || low.video_subject) el("subject").value = low.subject || low.video_subject;
-    const script = low.script || low.video_script || low.text || "";
-    if (script) el("script").value = script;
-    const kw = low.pexels_query || low.video_terms || low.keywords || low.terms || "";
-    if (kw) el("pexels_query").value = kw;
-    updateCharCount();
-
 }
 
-/* ---------------- müzik kütüphanesi ---------------- */
+/* ---------------- şarkılar & ayarlar ---------------- */
 
 async function loadSongs() {
-    const box = el("songs-list");
-    let data;
     try {
-        data = await api("/api/songs");
-    } catch (e) {
-        box.textContent = "Liste alınamadı: " + e.message;
-        return;
-    }
-    clearNode(box);
-    const songs = data.songs || [];
-    if (!songs.length) {
-        box.appendChild(make("div", "muted small", "Kütüphane boş. Yukarıdan müzik ekleyin."));
-        return;
-    }
-    songs.forEach(s => {
-        const row = make("div", "song-item");
-        row.appendChild(make("span", "song-name", `🎵 ${s.name} (${s.size_mb} MB)`));
-        const del = make("button", "btn-song-del", "🗑️");
-        del.title = s.name + " sil";
-        del.addEventListener("click", async () => {
-            if (!confirm(`"${s.name}" kütüphaneden silinsin mi?`)) return;
-            try {
-                await api("/api/songs/" + encodeURIComponent(s.name), { method: "DELETE" });
-                loadSongs();
-            } catch (e) { alert(e.message); }
+        const data = await api("/api/songs");
+        const container = el("songs-list");
+        clearNode(container);
+        const songs = data.songs || [];
+        if (!songs.length) {
+            container.appendChild(make("div", "empty-state", "Klasörde müzik bulunamadı."));
+            return;
+        }
+        songs.forEach(s => {
+            const row = make("div", "song-item");
+            const left = make("span", "song-name", `${s.name} (${s.size_mb} MB)`);
+            const del = make("button", "btn-song-del", "Sil");
+            del.addEventListener("click", async () => {
+                if (!confirm(`"${s.name}" silinsin mi?`)) return;
+                try {
+                    await api(`/api/songs/${encodeURIComponent(s.name)}`, { method: "DELETE" });
+                    loadSongs();
+                } catch (e) { alert(e.message); }
+            });
+            row.appendChild(left);
+            row.appendChild(del);
+            container.appendChild(row);
         });
-        row.appendChild(del);
-        box.appendChild(row);
-    });
+    } catch (e) { console.error(e); }
 }
 
 async function uploadSongs() {
     const input = el("song_files");
-    if (!input.files.length) {
-        alert("Önce müzik dosyası seçin.");
-        return;
+    if (!input.files || !input.files.length) { alert("Lütfen en az bir müzik dosyası seçin."); return; }
+    const fd = new FormData();
+    for (let i = 0; i < input.files.length; i++) {
+        fd.append("song_file", input.files[i]);
     }
     const btn = el("btn-upload-songs");
     btn.disabled = true;
-    btn.textContent = "⏳...";
-    const fd = new FormData();
-    [...input.files].forEach(f => fd.append("song_file", f));
+    btn.textContent = "⏳ Yükleniyor...";
     try {
-        const data = await api("/api/songs", { method: "POST", body: fd });
-        alert(data.message || "Eklendi");
+        const res = await api("/api/songs", { method: "POST", body: fd });
+        alert(res.message || "Müzikler eklendi.");
         input.value = "";
         loadSongs();
     } catch (e) {
@@ -853,50 +1099,48 @@ async function uploadSongs() {
     }
 }
 
-/* ---------------- ayarlar ---------------- */
-
-const SECRET_INPUTS = ["set_pexels", "set_pixabay", "set_openai", "set_gemini",
-    "set_groq", "set_deepseek", "set_azure_key", "set_elevenlabs", "set_ngrok"];
+const SECRET_INPUTS = [
+    "set_pexels", "set_pixabay", "set_openai", "set_gemini", "set_groq",
+    "set_deepseek", "set_azure_key", "set_elevenlabs", "set_ngrok"
+];
 
 async function loadSettings() {
+    let s = {};
     try {
         const data = await api("/api/settings");
-        const s = data.settings || {};
-        SECRET_INPUTS.forEach(id => {
-            const key = id.replace("set_", "");
-            const mapKey = { pexels: "pexels_api_keys",
-                pixabay: "pixabay_api_keys",
-                openai: "openai_api_key", gemini: "gemini_api_key",
-                groq: "groq_api_key", deepseek: "deepseek_api_key",
-                azure_key: "azure_speech_key", azure_reg: "azure_speech_region",
-                elevenlabs: "elevenlabs_api_key", ngrok: "ngrok_authtoken" }[key] || key;
-            const input = el(id);
-            input.value = "";
-            input.placeholder = s[mapKey] ? `Kayıtlı: ${s[mapKey]}` : "Kayıtlı değil";
-        });
-        el("auth-link").value = location.origin + "/?token=" + encodeURIComponent(s.auth_token || "");
-        applyProductionSettings(s);
+        s = data.settings || {};
     } catch (e) { console.error(e); }
-}
 
-function applyProductionSettings(s) {
-    const set = (id, val) => { const e = el(id); if (e && val !== undefined && val !== null) e.value = val; };
-    set("voice", s.prod_voice);
-    set("voice_rate", s.prod_voice_rate);
-    set("voice_volume", s.prod_voice_volume);
-    set("aspect", s.prod_aspect);
-    set("bg_style", s.prod_bg_style);
-    set("subtitle_enabled_chk", s.prod_subtitle_enabled);
-    set("sub_color", s.prod_sub_color);
-    set("sub_pos", s.prod_sub_pos);
-    set("sub_size", s.prod_sub_size);
-    set("sub_box", String(s.prod_sub_box) === "true" ? "true" : "false");
-    set("prod_highlight_color", s.prod_highlight_color);
-    set("prod_highlight_words", s.prod_highlight_words);
-    set("bgm_source", s.prod_bgm_mode);
-    set("bgm_volume", s.prod_bgm_volume);
-    set("prod_transition", s.prod_transition);
-    set("prod_transition_dur", s.prod_transition_dur);
+    SECRET_INPUTS.forEach(id => {
+        const k = id.replace(/^set_/, "");
+        const map = {
+            pexels: "pexels_api_keys", pixabay: "pixabay_api_keys",
+            openai: "openai_api_key", gemini: "gemini_api_key", groq: "groq_api_key",
+            deepseek: "deepseek_api_key", azure_key: "azure_speech_key",
+            elevenlabs: "elevenlabs_api_key", ngrok: "ngrok_authtoken"
+        };
+        const keyName = map[k] || k;
+        if (s[keyName] !== undefined && s[keyName] !== "") el(id).placeholder = s[keyName];
+    });
+
+    if (s.azure_speech_region) el("set_azure_reg").value = s.azure_speech_region;
+    if (s.prod_voice) el("voice").value = s.prod_voice;
+    if (s.prod_voice_rate !== undefined) el("voice_rate").value = String(s.prod_voice_rate);
+    if (s.prod_voice_volume !== undefined) el("voice_volume").value = String(s.prod_voice_volume);
+    if (s.prod_aspect) el("aspect").value = s.prod_aspect;
+    if (s.prod_resolution) el("resolution").value = s.prod_resolution;
+    if (s.prod_bg_style) el("bg_style").value = s.prod_bg_style;
+    if (s.prod_subtitle_enabled !== undefined) el("subtitle_enabled_chk").checked = s.prod_subtitle_enabled;
+    if (s.prod_sub_color) el("sub_color").value = s.prod_sub_color;
+    if (s.prod_sub_pos) el("sub_pos").value = s.prod_sub_pos;
+    if (s.prod_sub_size !== undefined) el("sub_size").value = String(s.prod_sub_size);
+    if (s.prod_sub_box !== undefined) el("sub_box").value = String(s.prod_sub_box);
+    if (s.prod_highlight_color && el("prod_highlight_color")) el("prod_highlight_color").value = s.prod_highlight_color;
+    if (s.prod_highlight_words !== undefined && el("prod_highlight_words")) el("prod_highlight_words").value = s.prod_highlight_words;
+    if (s.prod_bgm_mode) el("bgm_source").value = s.prod_bgm_mode;
+    if (s.prod_bgm_volume !== undefined) el("bgm_volume").value = String(s.prod_bgm_volume);
+    if (s.prod_transition) el("prod_transition").value = s.prod_transition;
+    if (s.prod_transition_dur !== undefined) el("prod_transition_dur").value = String(s.prod_transition_dur);
     if (s.prod_voice) updateSelectedVoiceDisplay(s.prod_voice, "");
 }
 
@@ -916,6 +1160,7 @@ async function saveSettings() {
         prod_voice_rate: parseFloat(el("voice_rate").value || "1.0"),
         prod_voice_volume: parseFloat(el("voice_volume").value || "1.0"),
         prod_aspect: el("aspect").value,
+        prod_resolution: el("resolution") ? el("resolution").value : "720p",
         prod_bg_style: el("bg_style").value,
         prod_subtitle_enabled: el("subtitle_enabled_chk").checked,
         prod_sub_color: el("sub_color").value,
@@ -1007,6 +1252,23 @@ function bindEvents() {
     if (bCancelAll) bCancelAll.addEventListener("click", cancelAllTasks);
     const bDeleteAll = el("btn-delete-all");
     if (bDeleteAll) bDeleteAll.addEventListener("click", deleteAllTasks);
+    const bDlAll = el("btn-download-all-zip");
+    if (bDlAll) bDlAll.addEventListener("click", downloadAllVideosZip);
+    const bDlDay = el("btn-download-day");
+    if (bDlDay) bDlDay.addEventListener("click", downloadAllVideosZip);
+
+    // Toplu ses havuzu olayları
+    const bVmodeDef = el("batch_vmode_default");
+    if (bVmodeDef) bVmodeDef.addEventListener("change", toggleBatchVoiceMode);
+    const bVmodePool = el("batch_vmode_pool");
+    if (bVmodePool) bVmodePool.addEventListener("change", toggleBatchVoiceMode);
+    const bVSearch = el("batch-voice-search");
+    if (bVSearch) bVSearch.addEventListener("input", filterBatchVoiceList);
+    const bSelTr = el("btn-batch-sel-tr");
+    if (bSelTr) bSelTr.addEventListener("click", selectTurkishBatchVoices);
+    const bSelClr = el("btn-batch-sel-clear");
+    if (bSelClr) bSelClr.addEventListener("click", clearBatchVoices);
+
     el("btn-ai-generate").addEventListener("click", aiGenerateScript);
     el("btn-json-fill").addEventListener("click", fillFormFromJson);
     const bFill = el("btn-batch-example-fill");

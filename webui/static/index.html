@@ -94,10 +94,9 @@
     <!-- TOPLU -->
     <section id="tab-batch" class="card hidden">
         <div class="section-title">📚 Toplu Script Otomasyonu</div>
-        <p class="hint">Dersleri <code>---</code> ile ayırın; her derse <code># Başlık</code> ve
-            <code>Keywords: k1, k2</code> ekleyebilirsiniz. Ya da direkt JSON yapıştırın:
+        <p class="hint">Dersleri <code>---</code> ile ayırın; her derse <code># Başlık</code>, <code>Keywords: k1, k2</code> ve isteğe bağlı <code>Ses: AhmetNeural</code> ekleyebilirsiniz. Ya da direkt JSON yapıştırın:
             dizi biçiminde <code>[{"video_subject": "...", "video_script": "...", "video_terms": [...]}]</code>
-            (alan adları: subject/script/keywords da kabul edilir).</p>
+            (alan adları: subject/script/keywords/voice da kabul edilir).</p>
         <div class="flex-row" style="gap:6px;">
             <a class="btn-sm btn-copy" href="/static/examples/mpt_ornek_toplu.json" download="mpt_ornek_toplu.json">⬇️ Örnek JSON İndir</a>
             <button class="btn-sm btn-copy" id="btn-batch-example-fill">📋 Örneği Kutuya Doldur</button>
@@ -108,10 +107,29 @@
 
         <label for="batch_text">Çoklu Script Metinleri</label>
         <textarea id="batch_text" style="min-height:160px"
-                  placeholder="# Ders 1: Üslü Sayılar&#10;Keywords: math, study&#10;Üslü sayılarda...&#10;---&#10;# Ders 2: Köklü Sayılar&#10;Keywords: algebra&#10;Köklü sayılarda..."></textarea>
+                  placeholder="# Ders 1: Üslü Sayılar&#10;Keywords: math, study&#10;Ses: tr-TR-AhmetNeural&#10;Üslü sayılarda...&#10;---&#10;# Ders 2: Köklü Sayılar&#10;Keywords: algebra&#10;Ses: tr-TR-EmelNeural&#10;Köklü sayılarda..."></textarea>
         <div id="batch-preview-box" class="batch-preview"></div>
 
-        <div class="hint">⚙️ Tüm üretim ayarları (ses, format, arka plan, altyazı, müzik, geçiş)
+        <div class="section-title">🎙️ Seslendirme Seçimi (Toplu Üretim)</div>
+        <div class="flex-row" style="gap:14px; margin-top:6px; margin-bottom:8px; flex-wrap:wrap;">
+            <label class="switch-row"><input type="radio" name="batch_voice_mode" id="batch_vmode_default" value="default" checked> ⚙️ Ayarlardaki Sesi Kullan</label>
+            <label class="switch-row"><input type="radio" name="batch_voice_mode" id="batch_vmode_pool" value="pool"> 🎲 Çoklu Ses / Rastgele Seçim</label>
+        </div>
+
+        <div id="batch-voice-pool-box" class="voice-box hidden" style="margin-top:8px;">
+            <div class="flex-row" style="justify-content:space-between; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
+                <span class="small muted">Seçili Ses Havuzu (<span id="batch-selected-count" class="accent" style="font-weight:bold;">0</span> ses — her videoya rastgele atanır):</span>
+                <div class="flex-row" style="gap:4px;">
+                    <button type="button" class="btn-sm btn-copy" id="btn-batch-sel-tr" style="padding:4px 8px; font-size:.7rem;" title="Tüm Türkçe sesleri seç">🇹🇷 Türkçe Sesler</button>
+                    <button type="button" class="btn-sm btn-copy" id="btn-batch-sel-clear" style="padding:4px 8px; font-size:.7rem;" title="Seçimleri temizle">🧹 Temizle</button>
+                </div>
+            </div>
+            <div id="batch-voice-chips" class="batch-voice-chips" style="display:flex; flex-wrap:wrap; gap:5px; margin-bottom:8px; min-height:24px;"></div>
+            <input type="text" id="batch-voice-search" placeholder="🔍 Ses ara (Ahmet, Emel, en, Male...)">
+            <div id="batch-voice-list-container" class="voice-list" style="max-height:150px; margin-top:6px;"></div>
+        </div>
+
+        <div class="hint" style="margin-top:10px;">⚙️ Diğer tüm üretim ayarları (format, arka plan, altyazı, müzik, geçiş)
             <b>Ayarlar → 🎬 Üretim Tercihleri</b> sekmesinden alınır.</div>
 
         <button class="btn-submit blue" id="btn-batch-submit">⚡ Toplu Üretimi Başlat</button>
@@ -121,7 +139,8 @@
     <section id="tab-history" class="card hidden">
         <div class="flex-row" style="justify-content:space-between; align-items:center; margin-bottom:14px; padding-bottom:10px; border-bottom:1px solid rgba(255,255,255,0.08); flex-wrap:wrap; gap:8px;">
             <div class="section-title" style="margin:0; font-size:1.05rem;">📁 Video Galerisi</div>
-            <div class="flex-row" style="gap:8px;">
+            <div class="flex-row" style="gap:8px; flex-wrap:wrap;">
+                <button class="btn-sm" id="btn-download-all-zip" style="background:#0284c722; color:#38bdf8; border:1px solid #0284c744; cursor:pointer;" title="Tamamlanmış tüm videoları tek bir ZIP olarak toplu indirir">📦 Tümünü ZIP İndir</button>
                 <button class="btn-sm" id="btn-cancel-all" style="background:#f59e0b22; color:#fbbf24; border:1px solid #f59e0b44; cursor:pointer;" title="Kuyruktaki ve çalışan tüm görevleri durdurur">⏹️ Tümünü İptal Et</button>
                 <button class="btn-sm" id="btn-delete-all" style="background:#ef444422; color:#f87171; border:1px solid #ef444444; cursor:pointer;" title="Tüm görevleri ve üretilen videoları siler">🗑️ Tümünü Sil</button>
             </div>

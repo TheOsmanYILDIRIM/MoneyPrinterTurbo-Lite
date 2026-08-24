@@ -1,9 +1,10 @@
 import json
 import os
 import glob
+import random
 import re
 import uuid
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from loguru import logger
 
@@ -15,6 +16,7 @@ KEYWORD_PREFIXES = (
     "etiketler:", "etiket:", "terms:", "tags:"
 )
 TITLE_PREFIXES = ("başlık:", "ders:", "konu:", "title:")
+VOICE_PREFIXES = ("ses:", "voice:", "seslendirmen:", "speaker:", "ses_modeli:")
 HIGHLIGHT_PREFIXES = ("highlight:", "vurgu:", "highlight_words:", "vurgulanan:", "vurgu_kelimeleri:")
 COLOR_PREFIXES = ("highlight_color:", "vurgu_renk:", "renk:")
 
@@ -26,11 +28,13 @@ def parse_batch_text(content: str) -> List[Dict[str, str]]:
     Desteklenen format:
         # 1. Ders: Üslü Sayılar
         Keywords: math study blackboard
+        Ses: tr-TR-AhmetNeural
         Vurgu: tabanlar, toplanır, üsler
         Üslü sayılarda tabanlar aynı iken üsler toplanır...
         ---
         # 2. Ders: Kurtuluş Savaşı
         Etiketler: history vintage library
+        Ses: tr-TR-EmelNeural
         Amasya Genelgesi milli mücadelenin...
     """
     items = []
@@ -43,6 +47,7 @@ def parse_batch_text(content: str) -> List[Dict[str, str]]:
 
         subject = f"Ders {idx}"
         pexels_query = ""
+        voice = ""
         highlight_words = ""
         highlight_color = ""
         script_lines = []
@@ -54,6 +59,11 @@ def parse_batch_text(content: str) -> List[Dict[str, str]]:
                 for p in TITLE_PREFIXES:
                     if low.startswith(p):
                         subject = line[len(p):].strip()
+                        break
+            elif any(low.startswith(p) for p in VOICE_PREFIXES):
+                for p in VOICE_PREFIXES:
+                    if low.startswith(p):
+                        voice = line[len(p):].strip()
                         break
             elif any(low.startswith(p) for p in KEYWORD_PREFIXES):
                 for p in KEYWORD_PREFIXES:
@@ -80,6 +90,8 @@ def parse_batch_text(content: str) -> List[Dict[str, str]]:
                 "script": script,
                 "pexels_query": pexels_query or subject
             }
+            if voice:
+                item_dict["voice"] = voice
             if highlight_words:
                 item_dict["highlight_words"] = highlight_words
             if highlight_color:
@@ -102,6 +114,7 @@ def _normalize_item(item: Dict[str, str]) -> Dict[str, str]:
                        or low.get("title") or "").strip(),
         "script": str(low.get("script") or low.get("video_script")
                       or low.get("text") or "").strip(),
+        "voice": str(low.get("voice") or low.get("ses") or low.get("speaker") or low.get("seslendirmen") or "").strip(),
         "pexels_query": str(low.get("pexels_query") or low.get("video_terms")
                             or low.get("keywords") or low.get("terms") or "").strip(),
         "highlight_words": low.get("highlight_words") or low.get("highlight") or low.get("vurgu") or low.get("vurgulanan") or "",
@@ -160,6 +173,7 @@ def parse_batch_input(input_path_or_content: str) -> List[Dict[str, str]]:
 
 def create_batch_tasks(items: List[Dict[str, str]],
                        voice: str = "tr-TR-AhmetNeural",
+                       voices: Optional[List[str]] = None,
                        voice_rate: float = 1.0,
                        voice_volume: float = 1.0,
                        aspect: str = "9:16",
@@ -178,11 +192,25 @@ def create_batch_tasks(items: List[Dict[str, str]],
                        highlight_size: Optional[int] = None,
                        bgm_mode: str = "none",
                        transition: str = "none",
-                       transition_dur: float = 0.5) -> List[str]:
+                       transition_dur: float = 0.5,
+                       batch_id: Optional[str] = None) -> List[str]:
     """Her ders için kuyrukta bekleyen bir görev oluşturur ve worker'ı uyandırır."""
+    import time
     total = len(items)
     task_ids = []
-    logger.info(f"Toplu üretim: {total} görev kuyruğa alınıyor...")
+    actual_batch_id = batch_id or f"batch_{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
+
+    # Çoklu ses havuzu analizi
+    voice_pool: List[str] = []
+    if voices and isinstance(voices, list):
+        voice_pool = [str(v).strip() for v in voices if str(v).strip()]
+    elif voice and ("," in voice or isinstance(voice, str)):
+        voice_pool = [v.strip() for v in voice.split(",") if v.strip()]
+
+    if voice_pool and len(voice_pool) > 1:
+        logger.info(f"Toplu üretim ({actual_batch_id}): {total} görev kuyruğa alınıyor. Çoklu ses havuzu ({len(voice_pool)} ses): {', '.join(voice_pool)}")
+    else:
+        logger.info(f"Toplu üretim ({actual_batch_id}): {total} görev kuyruğa alınıyor... Varsayılan ses: {voice}")
 
     for i, item in enumerate(items, 1):
         norm = _normalize_item(item)
@@ -190,11 +218,20 @@ def create_batch_tasks(items: List[Dict[str, str]],
         item_hl_color = norm.get("highlight_color") or highlight_color
         item_hl_size = int(norm.get("highlight_size")) if norm.get("highlight_size") else highlight_size
 
+        # Ses seçimi: Eğer script özelinde ses varsa onu kullan; yoksa ve çoklu ses havuzu varsa rastgele seç; aksi halde tekli sesi kullan
+        if norm.get("voice"):
+            task_voice = norm.get("voice")
+        elif voice_pool:
+            task_voice = random.choice(voice_pool)
+        else:
+            task_voice = voice or "tr-TR-AhmetNeural"
+
         task_id = task_store.create_task(
             task_id=uuid.uuid4().hex,
+            batch_id=actual_batch_id,
             subject=norm.get("subject") or f"Ders {i}",
             script=norm.get("script", ""),
-            voice=norm.get("voice", voice),
+            voice=task_voice,
             aspect=norm.get("aspect", aspect),
             resolution=norm.get("resolution", resolution),
             bg_style=norm.get("bg_style", bg_style),

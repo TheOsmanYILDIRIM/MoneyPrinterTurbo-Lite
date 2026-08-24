@@ -11,6 +11,7 @@ import sys
 import time
 import urllib.request
 import uuid
+import zipfile
 from urllib.parse import urlparse, parse_qs
 
 from loguru import logger
@@ -330,6 +331,9 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 "auth_url": f"http://{self.headers.get('Host', 'localhost')}:{PORT}/?token={self._get_token()}"
             })
 
+        if path in ("/api/tasks/download-zip", "/api/gallery/download-zip"):
+            return self._handle_download_zip(parse_qs(parsed.query))
+
         if path.startswith("/api/tasks/"):
             parts = path.split("/")
             if len(parts) >= 5 and parts[4] == "logs":
@@ -481,6 +485,10 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         if path in ("/api/tasks", "/api/tasks/all"):
             deleted = worker.cancel_and_delete_all()
             return self.send_json({"success": True, "count": deleted})
+        m = re.match(r"^/api/batches/([\w\-]+)$", path)
+        if m:
+            count = task_store.delete_batch(m.group(1))
+            return self.send_json({"success": True, "count": count})
         m = re.match(r"^/api/tasks/([\w\-]+)$", path)
         if m:
             ok = task_store.delete_task(m.group(1))
@@ -547,9 +555,22 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             return self.send_json({"error": "Geçerli ders scripti bulunamadı."}, 400)
 
         prod = settings_manager.load_settings()
+        raw_voices = fields.get("voices") or fields.get("voice") or prod.get("prod_voice", "tr-TR-AhmetNeural")
+        if isinstance(raw_voices, str) and "," in raw_voices:
+            voices_list = [v.strip() for v in raw_voices.split(",") if v.strip()]
+        elif isinstance(raw_voices, list):
+            voices_list = [str(v).strip() for v in raw_voices if str(v).strip()]
+        elif isinstance(raw_voices, str) and raw_voices.strip():
+            voices_list = [raw_voices.strip()]
+        else:
+            voices_list = ["tr-TR-AhmetNeural"]
+
+        batch_id = str(fields.get("batch_id") or "").strip() or f"batch_{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
         task_ids = batch_engine.create_batch_tasks(
             items,
-            voice=fields.get("voice") or prod.get("prod_voice", "tr-TR-AhmetNeural"),
+            batch_id=batch_id,
+            voice=voices_list[0] if voices_list else "tr-TR-AhmetNeural",
+            voices=voices_list,
             voice_rate=float(fields.get("voice_rate") or prod.get("prod_voice_rate", 1.0)),
             voice_volume=float(fields.get("voice_volume") or prod.get("prod_voice_volume", 1.0)),
             aspect=fields.get("aspect") if fields.get("aspect") in ("9:16", "16:9", "1:1")
@@ -572,7 +593,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             transition=fields.get("transition") or prod.get("prod_transition", "none"),
             transition_dur=float(fields.get("transition_dur") or prod.get("prod_transition_dur", 0.5)),
         )
-        return self.send_json({"code": 0, "count": len(task_ids),
+        return self.send_json({"code": 0, "batch_id": batch_id, "count": len(task_ids),
                                "task_ids": task_ids, "status": "queued"})
 
     def _handle_regenerate(self, task_id: str):
@@ -743,6 +764,106 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             return self.send_json({"error": "Önizleme üretilemedi"}, 500)
         return self._send_file_stream(preview_file)
 
+    def _handle_download_zip(self, qs: dict):
+        """Toplu baslatma grubu, secili gorevler veya tum tamamlanmis videolari SIKISTIRMASIZ (ZIP_STORED) ZIP arsivi olarak sunar."""
+        batch_id_param = (qs.get("batch_id") or [""])[0].strip()
+        task_ids_param = (qs.get("task_ids") or [""])[0].strip()
+        date_param = (qs.get("date") or [""])[0].strip()
+        is_all = bool(qs.get("all") or date_param.lower() == "all" or (not batch_id_param and not task_ids_param and not date_param))
+
+        target_task_ids = set([x.strip() for x in task_ids_param.split(",") if x.strip()]) if task_ids_param else set()
+
+        tasks = task_store.get_all_tasks()
+        completed = []
+        for t in tasks:
+            if t.get("state") != "completed":
+                continue
+            fp = t.get("file_path")
+            if not fp or not os.path.isfile(fp):
+                continue
+
+            if is_all:
+                completed.append(t)
+            elif target_task_ids:
+                if t.get("task_id") in target_task_ids:
+                    completed.append(t)
+            elif batch_id_param:
+                if t.get("batch_id") == batch_id_param:
+                    completed.append(t)
+            elif date_param:
+                t_date = (t.get("created_at_str") or "")[:10]
+                if t_date == date_param:
+                    completed.append(t)
+                else:
+                    try:
+                        c_date = time.strftime("%Y-%m-%d", time.localtime(t.get("created_at", 0)))
+                        if c_date == date_param:
+                            completed.append(t)
+                    except Exception:
+                        pass
+
+        if not completed:
+            return self.send_json({"error": "İndirilecek tamamlanmış video bulunamadı."}, 404)
+
+        # Videoları sırala (batch_index veya created_at artan sırayla)
+        completed.sort(key=lambda x: (x.get("batch_index") or 0, x.get("created_at", 0)))
+
+        temp_zip_dir = os.path.join(BASE_DIR, "storage", "temp_zips")
+        os.makedirs(temp_zip_dir, exist_ok=True)
+
+        # 1 saatten eski geçici zip dosyalarını temizle
+        try:
+            now = time.time()
+            for f in os.listdir(temp_zip_dir):
+                zp = os.path.join(temp_zip_dir, f)
+                if os.path.isfile(zp) and now - os.path.getmtime(zp) > 3600:
+                    os.remove(zp)
+        except Exception:
+            pass
+
+        zip_id = uuid.uuid4().hex[:8]
+        timestamp_tag = time.strftime("%Y%m%d_%H%M%S")
+
+        if batch_id_param:
+            clean_bname = sanitize_filename(batch_id_param)
+            dl_display_name = f"MoneyPrinter_{clean_bname}.zip"
+            zip_filename = f"mpt_{clean_bname}_{zip_id}.zip"
+        elif is_all:
+            dl_display_name = f"MoneyPrinter_tum_videolar_{timestamp_tag}.zip"
+            zip_filename = f"mpt_tum_videolar_{timestamp_tag}_{zip_id}.zip"
+        elif target_task_ids:
+            dl_display_name = f"MoneyPrinter_secili_videolar_{timestamp_tag}.zip"
+            zip_filename = f"mpt_secili_{timestamp_tag}_{zip_id}.zip"
+        else:
+            dl_display_name = f"MoneyPrinter_videolar_{date_param or timestamp_tag}.zip"
+            zip_filename = f"mpt_videolar_{date_param or timestamp_tag}_{zip_id}.zip"
+
+        zip_path = os.path.join(temp_zip_dir, zip_filename)
+
+        used_arcnames = set()
+        # Sıkıştırmasız ZIP (ZIP_STORED): Videolar zaten h264/aac sıkıştırmalı olduğu için sıfır CPU, anında byte kopyalama
+        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_STORED) as zf:
+            for idx, t in enumerate(completed, 1):
+                raw_title = t.get("subject") or f"video_{idx}"
+                safe_title = sanitize_filename(raw_title).replace(" ", "_")
+                b_idx = t.get("batch_index")
+                num_prefix = f"{b_idx:02d}_" if b_idx is not None else f"{idx:02d}_"
+
+                if not safe_title.lower().endswith(".mp4"):
+                    arcname = f"{num_prefix}{safe_title}.mp4"
+                else:
+                    arcname = f"{num_prefix}{safe_title}"
+
+                base_arc, ext_arc = os.path.splitext(arcname)
+                counter = 1
+                while arcname in used_arcnames:
+                    arcname = f"{base_arc}_{counter}{ext_arc}"
+                    counter += 1
+                used_arcnames.add(arcname)
+                zf.write(t["file_path"], arcname=arcname)
+
+        return self._send_file_stream(zip_path, download_name=dl_display_name)
+
     # ---------------------------------------------------------- tunnel
 
     def _tunnel_status(self) -> dict:
@@ -828,6 +949,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
 
 def main():
     sys.path.insert(0, BASE_DIR)
+    task_store.migrate_legacy_batches()
     token = settings_manager.get_auth_token()
     worker.start_worker()
 
