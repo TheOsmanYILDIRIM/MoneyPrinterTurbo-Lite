@@ -1194,6 +1194,12 @@ async function loadSettings() {
     if (s.prod_bgm_volume !== undefined) el("bgm_volume").value = String(s.prod_bgm_volume);
     if (s.prod_transition) el("prod_transition").value = s.prod_transition;
     if (s.prod_transition_dur !== undefined) el("prod_transition_dur").value = String(s.prod_transition_dur);
+    if (s.ffmpeg_cq_gpu !== undefined && el("ffmpeg_cq_gpu")) el("ffmpeg_cq_gpu").value = String(s.ffmpeg_cq_gpu);
+    if (s.ffmpeg_preset_gpu && el("ffmpeg_preset_gpu")) el("ffmpeg_preset_gpu").value = s.ffmpeg_preset_gpu;
+    if (s.ffmpeg_crf_cpu !== undefined && el("ffmpeg_crf_cpu")) el("ffmpeg_crf_cpu").value = String(s.ffmpeg_crf_cpu);
+    if (s.ffmpeg_preset_cpu && el("ffmpeg_preset_cpu")) el("ffmpeg_preset_cpu").value = s.ffmpeg_preset_cpu;
+    if (s.ffmpeg_audio_bitrate && el("ffmpeg_audio_bitrate")) el("ffmpeg_audio_bitrate").value = s.ffmpeg_audio_bitrate;
+    if (s.ffmpeg_threads && el("ffmpeg_threads")) el("ffmpeg_threads").value = s.ffmpeg_threads;
     if (s.prod_voice) updateSelectedVoiceDisplay(s.prod_voice, "");
 }
 
@@ -1225,7 +1231,13 @@ async function saveSettings() {
         prod_bgm_mode: el("bgm_source").value,
         prod_bgm_volume: parseFloat(el("bgm_volume").value || "0.15"),
         prod_transition: el("prod_transition").value,
-        prod_transition_dur: parseFloat(el("prod_transition_dur").value || "0.5")
+        prod_transition_dur: parseFloat(el("prod_transition_dur").value || "0.5"),
+        ffmpeg_cq_gpu: el("ffmpeg_cq_gpu") ? parseInt(el("ffmpeg_cq_gpu").value, 10) : 23,
+        ffmpeg_preset_gpu: el("ffmpeg_preset_gpu") ? el("ffmpeg_preset_gpu").value : "p4",
+        ffmpeg_crf_cpu: el("ffmpeg_crf_cpu") ? parseInt(el("ffmpeg_crf_cpu").value, 10) : 23,
+        ffmpeg_preset_cpu: el("ffmpeg_preset_cpu") ? el("ffmpeg_preset_cpu").value : "ultrafast",
+        ffmpeg_audio_bitrate: el("ffmpeg_audio_bitrate") ? el("ffmpeg_audio_bitrate").value : "128k",
+        ffmpeg_threads: el("ffmpeg_threads") ? el("ffmpeg_threads").value : "2"
     };
     try {
         await api("/api/settings", {

@@ -61,7 +61,15 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "prod_bgm_mode": "none",
     "prod_bgm_volume": 0.15,
     "prod_transition": "none",
-    "prod_transition_dur": 0.5
+    "prod_transition_dur": 0.5,
+
+    # --- FFmpeg Video & Ses Sıkıştırma / Hızlandırma Ayarları ---
+    "ffmpeg_cq_gpu": 23,
+    "ffmpeg_preset_gpu": "p4",
+    "ffmpeg_crf_cpu": 23,
+    "ffmpeg_preset_cpu": "ultrafast",
+    "ffmpeg_audio_bitrate": "128k",
+    "ffmpeg_threads": "2"
 }
 
 SECRET_KEYS = {

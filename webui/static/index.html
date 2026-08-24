@@ -356,6 +356,77 @@
                     <option value="1.0">1.0</option>
                 </select>
             </div>
+        <div class="section-title">⚡ FFmpeg Video & Ses Sıkıştırma (GPU / CPU)</div>
+        <p class="hint">GPU ve CPU için sıkıştırma (CRF / CQ), render hızını ve ses bit hızını ayarlayın.</p>
+        
+        <div class="grid-2">
+            <div>
+                <label for="ffmpeg_cq_gpu">🚀 NVIDIA GPU Sıkıştırma (CQ: 18-32)</label>
+                <select id="ffmpeg_cq_gpu">
+                    <option value="18">18 - Ultra Kalite (Büyük Dosya)</option>
+                    <option value="20">20 - Çok Yüksek Kalite</option>
+                    <option value="23" selected>23 - Dengeli & Optimize (Önerilen)</option>
+                    <option value="26">26 - Kompakt (Küçük Dosya)</option>
+                    <option value="30">30 - Yüksek Sıkıştırma (En Küçük)</option>
+                </select>
+            </div>
+            <div>
+                <label for="ffmpeg_preset_gpu">🚀 GPU Kodlama Profili</label>
+                <select id="ffmpeg_preset_gpu">
+                    <option value="p1">p1 - En Hızlı (Fastest)</option>
+                    <option value="p2">p2 - Çok Hızlı</option>
+                    <option value="p3">p3 - Hızlı</option>
+                    <option value="p4" selected>p4 - Dengeli (Önerilen)</option>
+                    <option value="p5">p5 - Yüksek Kalite</option>
+                    <option value="p6">p6 - Çok Yüksek Kalite</option>
+                    <option value="p7">p7 - En Yüksek Kalite</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="grid-2 mt6">
+            <div>
+                <label for="ffmpeg_crf_cpu">🖥️ CPU Sıkıştırma (CRF: 18-32)</label>
+                <select id="ffmpeg_crf_cpu">
+                    <option value="18">18 - Ultra Kalite (Büyük Dosya)</option>
+                    <option value="20">20 - Yüksek Kalite</option>
+                    <option value="23" selected>23 - Standart Dengeli (Önerilen)</option>
+                    <option value="26">26 - Kompakt (Küçük Dosya)</option>
+                    <option value="30">30 - Yüksek Sıkıştırma (En Küçük)</option>
+                </select>
+            </div>
+            <div>
+                <label for="ffmpeg_preset_cpu">🖥️ CPU Hız Ön Ayarı (Preset)</label>
+                <select id="ffmpeg_preset_cpu">
+                    <option value="ultrafast" selected>ultrafast (En Hızlı Render)</option>
+                    <option value="superfast">superfast (Çok Hızlı)</option>
+                    <option value="veryfast">veryfast (Hızlı & İyi)</option>
+                    <option value="faster">faster (Dengeli Hızlı)</option>
+                    <option value="fast">fast (Daha İyi Sıkıştırma)</option>
+                    <option value="medium">medium (Klasik / Yavaş)</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="grid-2 mt6">
+            <div>
+                <label for="ffmpeg_audio_bitrate">🔊 Ses Bit Hızı (Audio Bitrate)</label>
+                <select id="ffmpeg_audio_bitrate">
+                    <option value="64k">64 kbps (Mono / Düşük Boyut)</option>
+                    <option value="96k">96 kbps (Kompakt)</option>
+                    <option value="128k" selected>128 kbps (Standart HD - Önerilen)</option>
+                    <option value="192k">192 kbps (Yüksek Kalite Stüdyo)</option>
+                </select>
+            </div>
+            <div>
+                <label for="ffmpeg_threads">🧵 CPU Render Çekirdek Sayısı</label>
+                <select id="ffmpeg_threads">
+                    <option value="auto">Otomatik (Tüm Çekirdekler)</option>
+                    <option value="2" selected>2 Çekirdek (Dengeli)</option>
+                    <option value="4">4 Çekirdek (Hızlı)</option>
+                    <option value="8">8 Çekirdek (Maksimum Güç)</option>
+                </select>
+            </div>
         </div>
 
         <div class="section-title">🔐 Erişim Bağlantısı</div>

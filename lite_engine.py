@@ -51,12 +51,13 @@ def get_ffmpeg_binary() -> str:
 def get_video_encoder_config() -> dict:
     """
     Sistemdeki donanım hızlandırmayı (NVIDIA GPU NVENC, Apple VideoToolbox, VAAPI vb.)
-    otomatik algılar ve en optimize video encoder ayarlarını döndürür.
-    Google Colab GPU'da (T4, A100, V100) 10x-30x render hızlanması sağlar.
+    otomatik algılar ve settings.json'daki sıkıştırma / preset ayarlarına göre yapılandırır.
     """
-    global _ENCODER_CONFIG
-    if _ENCODER_CONFIG is not None:
-        return _ENCODER_CONFIG
+    import settings_manager
+    gpu_cq = int(settings_manager.get_setting("ffmpeg_cq_gpu", 23) or 23)
+    gpu_preset = str(settings_manager.get_setting("ffmpeg_preset_gpu", "p4") or "p4")
+    cpu_crf = int(settings_manager.get_setting("ffmpeg_crf_cpu", 23) or 23)
+    cpu_preset = str(settings_manager.get_setting("ffmpeg_preset_cpu", "ultrafast") or "ultrafast")
 
     ffmpeg_bin = get_ffmpeg_binary()
 
@@ -68,14 +69,12 @@ def get_video_encoder_config() -> dict:
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=3.0
         )
         if res.returncode == 0:
-            logger.success("🚀 NVIDIA GPU Donanım Hızlandırma Algılandı! (h264_nvenc aktif - GPU Hızlandırmalı Render)")
-            _ENCODER_CONFIG = {
+            return {
                 "name": "h264_nvenc",
                 "is_gpu": True,
-                "encoder_args": ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "22"],
-                "fast_args": ["-c:v", "h264_nvenc", "-preset", "p1", "-cq", "24"]
+                "encoder_args": ["-c:v", "h264_nvenc", "-preset", gpu_preset, "-cq", str(gpu_cq)],
+                "fast_args": ["-c:v", "h264_nvenc", "-preset", "p1", "-cq", str(min(32, gpu_cq + 2))]
             }
-            return _ENCODER_CONFIG
         else:
             if shutil.which("nvidia-smi") or os.path.exists("/usr/bin/nvidia-smi"):
                 logger.warning(f"NVIDIA GPU mevcut fakat FFmpeg NVENC kontrolü başarısız oldu (rc={res.returncode}): {res.stderr.strip()[:150]}")
@@ -85,31 +84,27 @@ def get_video_encoder_config() -> dict:
     # 2. Apple Silicon VideoToolbox Kontrolü (macOS)
     try:
         res = subprocess.run(
-            [ffmpeg_bin, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "nullsrc=s=64x64:d=0.1",
+            [ffmpeg_bin, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "nullsrc=s=256x256:d=0.1",
              "-c:v", "h264_videotoolbox", "-f", "null", "-"],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=2.0
         )
         if res.returncode == 0:
-            logger.success("🚀 Apple Silicon VideoToolbox Donanım Hızlandırma Algılandı!")
-            _ENCODER_CONFIG = {
+            return {
                 "name": "h264_videotoolbox",
                 "is_gpu": True,
                 "encoder_args": ["-c:v", "h264_videotoolbox", "-q:v", "65"],
                 "fast_args": ["-c:v", "h264_videotoolbox", "-q:v", "60"]
             }
-            return _ENCODER_CONFIG
     except Exception:
         pass
 
     # 3. CPU Fallback (libx264 - Termux ARM64, CPU Colab & Standart CPU)
-    logger.info("ℹ️ CPU Video Kodlama Kullanılıyor (libx264 - ultrafast)")
-    _ENCODER_CONFIG = {
+    return {
         "name": "libx264",
         "is_gpu": False,
-        "encoder_args": ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "22"],
-        "fast_args": ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "23"]
+        "encoder_args": ["-c:v", "libx264", "-preset", cpu_preset, "-crf", str(cpu_crf)],
+        "fast_args": ["-c:v", "libx264", "-preset", "ultrafast", "-crf", str(min(35, cpu_crf + 2))]
     }
-    return _ENCODER_CONFIG
 
 
 DEFAULT_FONT_PATH = "/system/fonts/Roboto-Regular.ttf"
@@ -907,14 +902,19 @@ def render_video_ffmpeg(
 
     encoder_cfg = get_video_encoder_config()
     cmd.extend(["-vf", vf_str])
+    import settings_manager
+    audio_bitrate = str(settings_manager.get_setting("ffmpeg_audio_bitrate", "128k") or "128k")
+    cpu_threads = str(settings_manager.get_setting("ffmpeg_threads", "2") or "2")
+
     cmd.extend(encoder_cfg["encoder_args"])
     if not encoder_cfg.get("is_gpu"):
         cmd.extend(["-tune", "stillimage" if not is_video_bg else "film"])
-        cmd.extend(["-threads", "2"])
+        if cpu_threads and cpu_threads != "auto":
+            cmd.extend(["-threads", cpu_threads])
 
     cmd.extend([
         "-c:a", "aac",
-        "-b:a", "128k",
+        "-b:a", audio_bitrate,
         "-pix_fmt", "yuv420p",
         "-shortest",
         "-t", f"{duration + 0.2:.2f}",
