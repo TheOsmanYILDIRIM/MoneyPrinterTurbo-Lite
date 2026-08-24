@@ -63,7 +63,7 @@ def get_video_encoder_config() -> dict:
     # 1. NVIDIA GPU NVENC Kontrolü (Google Colab GPU, Linux NVIDIA)
     try:
         res = subprocess.run(
-            [ffmpeg_bin, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "nullsrc=s=64x64:d=0.1",
+            [ffmpeg_bin, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "nullsrc=s=256x256:d=0.1",
              "-c:v", "h264_nvenc", "-f", "null", "-"],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=3.0
         )
