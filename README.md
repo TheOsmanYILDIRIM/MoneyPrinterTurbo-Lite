@@ -56,9 +56,9 @@ MoneyPrinterTurbo-Lite/
 
 ---
 
-### 2. Termux & Linux Kurulumu
+### 2. Termux (Android) Kurulumu & Çalıştırma
 
-**Gereksinimler:** Python 3.10+ ve FFmpeg (`pkg install ffmpeg -y` veya `apt install ffmpeg -y`)
+**Gereksinimler:** Python 3.10+ ve FFmpeg (`pkg install ffmpeg -y`)
 
 ```bash
 # Depoyu klonlayın
@@ -68,32 +68,181 @@ cd MoneyPrinterTurbo-Lite
 # Bağımlılıkları yükleyin
 pip install -r requirements-lite.txt
 
-# Yapılandırmayı oluşturun
-cp config.example.toml config.toml
-```
-
-`config.toml` dosyasında LLM API anahtarınızı (Gemini, DeepSeek, OpenAI vb.) ve Pexels API anahtarınızı tanımlayın.
-
-**Çalıştırma:**
-```bash
+# Başlatın
 chmod +x start.sh
 ./start.sh
 ```
 
-Sunucu başladığında terminalde tokenlı erişim bağlantısı gösterilecek ve otomatik olarak tarayıcınızda açılacaktır:
+---
+
+### 3. Uzak Sunucu (VPS / Cloud / Linux Server) Kurulumu ve WebUI Uzaktan Erişim
+
+MoneyPrinterTurbo Lite, uzak bir sunucuda (Ubuntu, Debian, CentOS, AWS, Hetzner, DigitalOcean vb.) headless veya arka plan servisi olarak çalıştırıldığında WebUI arayüzüne ve tüm fonksiyonlara uzaktan erişmek için birden çok yöntem sunar.
+
+#### 🌐 Yöntem A: Cloudflare Tunnel ile Sıfır Yapılandırmalı Genel Erişim (Önerilen)
+Hiçbir port açmaya veya statik IP'ye gerek kalmadan, tek komutla dünya genelinden erişilebilir güvenli bir `https://*.trycloudflare.com` bağlantısı alabilirsiniz.
+
+```bash
+# 1. Cloudflared kurun (Ubuntu/Debian)
+curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb && sudo dpkg -i cloudflared.deb
+
+# 2. Sunucuyu Cloudflare Tüneli ile başlatın
+./start.sh --tunnel cloudflare
+# veya
+./server.sh start --tunnel
 ```
-http://127.0.0.1:8080/?token=YOUR_AUTH_TOKEN
+*Terminalde üretilen `https://xyz.trycloudflare.com/?token=YOUR_TOKEN` bağlantısına tıklayarak doğrudan WebUI'a erişin.*
+
+---
+
+#### ⚡ Yöntem B: Ngrok Tunnel ile Erişim
+```bash
+# Ngrok ile başlatma
+./start.sh --tunnel ngrok
+# veya
+./server.sh start -t ngrok
+```
+*WebUI üzerinden **Ayarlar** sekmesinden Ngrok Authtoken'ınızı kaydedebilir veya `config.toml` dosyasında belirtebilirsiniz.*
+
+---
+
+#### 🔌 Yöntem C: Doğrudan Sunucu IP'si ve Port (Direct IP)
+Sunucunuzun 8080 portunu güvenlik duvarından (UFW / Cloud Firewall) açarak doğrudan bağlanabilirsiniz:
+
+```bash
+# UFW güvenlik duvarında porta izin verin
+sudo ufw allow 8080/tcp
+
+# Sunucuyu başlatın
+./server.sh start
+```
+*Tarayıcınızdan `http://SUNUCU_IP_ADRESI:8080/?token=YOUR_AUTH_TOKEN` adresine gidin.*
+
+---
+
+#### 🔒 Yöntem D: SSH Tüneli (SSH Port Forwarding)
+Portları dışarıya açmak istemiyorsanız yerel bilgisayarınızdan SSH tüneli kurarak `localhost` gibi bağlanabilirsiniz:
+
+```bash
+# Yerel bilgisayarınızın terminalinde çalıştırın:
+ssh -N -L 8080:127.0.0.1:8080 kullanici@sunucu_ip
+```
+*Ardından yerel tarayıcınızda `http://127.0.0.1:8080/?token=YOUR_AUTH_TOKEN` adresini açın.*
+
+---
+
+#### 🛡️ Yöntem E: Nginx Reverse Proxy & SSL (Domain ile Erişim)
+Kendi domain adınız ile çalıştırmak için örnek Nginx konfigürasyonu:
+
+```nginx
+server {
+    server_name video.alanadiniz.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        client_max_body_size 250M;
+    }
+}
 ```
 
 ---
 
-## ⚙️ REST API & Kullanım
+#### 🔄 Yöntem F: Systemd ile 7/24 Arka Planda Servis Olarak Çalıştırma
+Sunucu yeniden başladığında otomatik çalışması için:
 
-`lite_server.py` üzerinden video üretim görevleri başlatılabilir:
+`/etc/systemd/system/moneyprinter.service`:
+```ini
+[Unit]
+Description=MoneyPrinter Turbo Lite Service
+After=network.target
 
-- **POST `/api/v1/tasks`**: Yeni video üretim görevi oluşturur.
-- **GET `/api/v1/tasks/{task_id}`**: Görev durumunu, ilerleme yüzdesini ve tamamlanan video URL'sini döner.
-- **GET `/api/v1/tasks`**: Tüm görevlerin listesini döner.
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/MoneyPrinterTurbo-Lite
+ExecStart=/usr/bin/python3 /home/ubuntu/MoneyPrinterTurbo-Lite/lite_server.py --host 0.0.0.0 --port 8080 --tunnel cloudflare
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now moneyprinter
+sudo systemctl status moneyprinter
+```
+
+---
+
+## 🛠️ Sunucu Yönetim Komutları (`server.sh`)
+
+Sunucunuzda süreçleri kolayca yönetmek için `server.sh` scriptini kullanabilirsiniz:
+
+```bash
+./server.sh start          # Sunucuyu arka planda başlatır
+./server.sh start --tunnel # Sunucuyu Cloudflare tüneli ile başlatır
+./server.sh stop           # Sunucuyu ve tüm tünelleri durdurur
+./server.sh restart        # Sunucuyu yeniden başlatır
+./server.sh status         # Aktif URL'leri, yerel/sunucu IP'lerini ve tünel durumunu gösterir
+./server.sh logs           # Canlı sunucu loglarını görüntüler
+./server.sh tunnel         # Çalışan sunucuya dinamik olarak tünel bağlar
+./server.sh tunnel-stop    # Aktif tüneli kapatır
+```
+
+---
+
+## 🖥️ WebUI Özellikleri & Uzaktan Yapılabilen Tüm İşlemler
+
+Uzak sunucudaki WebUI arayüzü üzerinden aşağıdaki tüm işlemler eksiksiz yapılabilir:
+
+1. 🎬 **Tekli Video Üretimi (`tab-create`):**
+   - Konu / Senaryo girişi veya AI (Gemini, DeepSeek, OpenAI, Claude, Groq) ile tek tıkla senaryo & arama terimleri üretimi.
+   - 4K UHD, 2K QHD, 1080p, 720p çözünürlük ve 9:16, 16:9, 1:1 en-boy oranı seçimi.
+   - Pexels otomatik çoklu stok video indirme ve sahne eşleme.
+   - Özel arka plan görseli/videosu veya özel ses dosyası yükleme.
+   - Gelişmiş altyazı renkleri, font boyutu, kalınlık (bold), çerçeve (stroke), arka plan kutusu ve vurgulu kelime efektleri.
+   - Arka plan müziği (BGM) ses seviyesi ve geçiş efektleri (crossfade).
+
+2. ⚡ **Toplu Video Üretimi (`tab-batch`):**
+   - Çoklu ders veya konu listesini JSON formatında veya metin kutusuna girerek tek tıkla kuyruğa alma.
+   - Otomatik ses havuzu (Voice Pool) ile her videoda farklı Türkçe/Yabancı ses kullanabilme.
+   - Görevleri sırayla işleme, hata durumunda kaldığı yerden devam edebilme (Resume).
+
+3. 📜 **Görev Geçmişi & Medya Yönetimi (`tab-history`):**
+   - Tamamlanan videoları tarayıcıda doğrudan oynatma ve canlı önizleme.
+   - Tek tek video indirme veya tüm günün/tüm üretilen videoları **Tek Tıkla ZIP Olarak İndirme**.
+   - Yeniden render alma, ses/görüntü varyantı üretme, görevi iptal etme veya silme.
+
+4. ⚙️ **Ayarlar & Kimlik Doğrulama (`tab-settings`):**
+   - API anahtarlarını (OpenAI, Gemini, DeepSeek, Groq, Pexels, ElevenLabs, Azure) tarayıcıdan güvenle tanımlama ve kaydetme.
+   - Dahili seslendirme önizleme çaları (Voice Preview) ile sesleri test etme.
+   - Arka plan müzikleri (BGM) yükleme ve silme.
+   - **Canlı Tünel Kontrolü:** WebUI içerisinden tek tıkla Cloudflare veya Ngrok tünelini başlatma/durdurma, tokenlı genel erişim bağlantısını kopyalama.
+
+---
+
+## ⚙️ REST API & Entegrasyon
+
+`lite_server.py` HTTP REST API uçları:
+
+- **GET `/api/tunnel/status`**: Aktif tünel durumu, sunucu IP'leri ve tokenlı bağlantıları döner.
+- **POST `/api/tunnel/start`**: `{"provider": "cloudflare"|"ngrok"}` ile dinamik tünel başlatır.
+- **POST `/api/tunnel/stop`**: Aktif tüneli durdurur.
+- **POST `/api/generate`**: Tekli video üretim görevi başlatır.
+- **POST `/api/batch`**: Toplu video üretim görevi başlatır.
+- **GET `/api/tasks`**: Tüm görevlerin durumunu listeler.
+- **GET `/api/tasks/{task_id}`**: Tekil görev durumunu döner.
+- **GET `/api/tasks/download-all-zip`**: Tüm tamamlanmış videoları tek bir ZIP arşivi olarak indirir.
+- **POST `/api/llm/generate`**: LLM ile otomatik senaryo üretir.
 
 ---
 

@@ -1192,29 +1192,116 @@ function toggleKeyVisibility() {
     SECRET_INPUTS.forEach(id => { el(id).type = show ? "text" : "password"; });
 }
 
-async function startTunnel() {
-    const btn = el("btn-tunnel-start");
-    const status = el("tunnel-status");
-    btn.disabled = true;
-    status.textContent = "Başlatılıyor...";
+async function loadTunnelStatus() {
     try {
-        const data = await api("/api/tunnel/start", { method: "POST" });
-        status.innerHTML = "";
-        if (data.public_url) {
-            const a = document.createElement("a");
-            a.href = data.public_url;
-            a.textContent = data.public_url;
-            a.target = "_blank";
-            a.className = "accent";
-            status.appendChild(a);
+        const data = await api("/api/tunnel/status");
+        const badge = el("tunnel-status-badge");
+        const urlBox = el("tunnel-url-container");
+        const pubInput = el("tunnel-public-url");
+        const openLink = el("btn-open-tunnel-url");
+        const btnStart = el("btn-tunnel-start");
+        const btnStop = el("btn-tunnel-stop");
+        const localList = el("local-urls-list");
+
+        if (data.running && data.public_url) {
+            badge.textContent = `● Aktif (${data.provider || "Tunnel"})`;
+            badge.style.background = "#065f46";
+            badge.style.color = "#6ee7b7";
+            badge.style.borderColor = "#059669";
+            pubInput.value = data.auth_url || data.public_url;
+            openLink.href = data.auth_url || data.public_url;
+            urlBox.classList.remove("hidden");
+            btnStart.classList.add("hidden");
+            btnStop.classList.remove("hidden");
+            if (data.provider && el("tunnel_provider_select")) {
+                el("tunnel_provider_select").value = data.provider;
+                toggleNgrokTokenField();
+            }
         } else {
-            status.textContent = data.error || "Tunnel başlatılamadı";
+            badge.textContent = "○ Kapalı";
+            badge.style.background = "#1e293b";
+            badge.style.color = "#94a3b8";
+            badge.style.borderColor = "#334155";
+            urlBox.classList.add("hidden");
+            btnStart.classList.remove("hidden");
+            btnStop.classList.add("hidden");
+        }
+
+        if (localList) {
+            localList.innerHTML = "";
+            const urls = (data.local_urls && data.local_urls.length > 0) ? data.local_urls : [`http://127.0.0.1:${data.port || 8080}/?token=${data.token || ""}`];
+            urls.forEach(u => {
+                const div = document.createElement("div");
+                div.style.marginTop = "3px";
+                div.innerHTML = `👉 <a href="${u}" target="_blank" class="accent" style="text-decoration:underline;">${u}</a>`;
+                localList.appendChild(div);
+            });
         }
     } catch (e) {
-        status.textContent = e.message;
+        console.warn("Tunnel durumu alınamadı:", e);
+    }
+}
+
+function toggleNgrokTokenField() {
+    const sel = el("tunnel_provider_select");
+    const container = el("ngrok_token_container");
+    if (sel && container) {
+        container.classList.toggle("hidden", sel.value !== "ngrok");
+    }
+}
+
+async function startTunnel() {
+    const btn = el("btn-tunnel-start");
+    const badge = el("tunnel-status-badge");
+    const provider = (el("tunnel_provider_select") ? el("tunnel_provider_select").value : "cloudflare") || "cloudflare";
+    btn.disabled = true;
+    badge.textContent = `⏳ Başlatılıyor (${provider})...`;
+    try {
+        const data = await api("/api/tunnel/start", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ provider })
+        });
+        if (data.error) {
+            alert("⚠️ " + data.error);
+        }
+        await loadTunnelStatus();
+    } catch (e) {
+        alert("Hata: " + e.message);
     } finally {
         btn.disabled = false;
+        await loadTunnelStatus();
     }
+}
+
+async function stopTunnel() {
+    const btn = el("btn-tunnel-stop");
+    const badge = el("tunnel-status-badge");
+    btn.disabled = true;
+    badge.textContent = "⏳ Durduruluyor...";
+    try {
+        await api("/api/tunnel/stop", { method: "POST" });
+        await loadTunnelStatus();
+    } catch (e) {
+        alert("Hata: " + e.message);
+    } finally {
+        btn.disabled = false;
+        await loadTunnelStatus();
+    }
+}
+
+function copyTunnelUrl() {
+    const pubInput = el("tunnel-public-url");
+    if (!pubInput || !pubInput.value) return;
+    navigator.clipboard.writeText(pubInput.value).then(() => {
+        const btn = el("btn-copy-tunnel-url");
+        const orig = btn.textContent;
+        btn.textContent = "✅ Kopyalandı!";
+        setTimeout(() => { btn.textContent = orig; }, 2000);
+    }).catch(() => {
+        pubInput.select();
+        document.execCommand("copy");
+    });
 }
 
 /* ---------------- sekmeler ---------------- */
@@ -1223,7 +1310,7 @@ const TAB_IDS = ["tab-create", "tab-batch", "tab-history", "tab-settings"];
 const TAB_ENTER = {
     "tab-batch": updateBatchPreview,
     "tab-history": loadTasks,
-    "tab-settings": () => { loadSettings(); loadSongs(); }
+    "tab-settings": () => { loadSettings(); loadSongs(); loadTunnelStatus(); }
 };
 
 function switchTab(tabId) {
@@ -1246,7 +1333,16 @@ function bindEvents() {
     el("btn-voice-preview").addEventListener("click", playVoicePreview);
     el("btn-batch-submit").addEventListener("click", submitBatch);
     el("btn-save-settings").addEventListener("click", saveSettings);
-    el("btn-tunnel-start").addEventListener("click", startTunnel);
+    
+    const bTunStart = el("btn-tunnel-start");
+    if (bTunStart) bTunStart.addEventListener("click", startTunnel);
+    const bTunStop = el("btn-tunnel-stop");
+    if (bTunStop) bTunStop.addEventListener("click", stopTunnel);
+    const bCopyTun = el("btn-copy-tunnel-url");
+    if (bCopyTun) bCopyTun.addEventListener("click", copyTunnelUrl);
+    const selTunProv = el("tunnel_provider_select");
+    if (selTunProv) selTunProv.addEventListener("change", toggleNgrokTokenField);
+
     el("btn-upload-songs").addEventListener("click", uploadSongs);
     const bCancelAll = el("btn-cancel-all");
     if (bCancelAll) bCancelAll.addEventListener("click", cancelAllTasks);

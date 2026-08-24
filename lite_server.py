@@ -41,7 +41,9 @@ BGM_EXTENSIONS = (".mp3", ".m4a", ".aac", ".wav", ".flac", ".ogg", ".opus")
 PORT = int(os.getenv("PORT", "8080"))
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024  # 200MB
 
-_ngrok_proc: subprocess.Popen | None = None
+_tunnel_proc: subprocess.Popen | None = None
+_tunnel_provider: str = "none"
+_tunnel_log_file = None
 
 
 # ---------------------------------------------------------------- helpers
@@ -283,9 +285,17 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
 
     # ---------------------------------------------------------- routing
 
+    def do_HEAD(self):
+        if not self._guard():
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self._set_auth_cookie()
+        self.end_headers()
+
     def do_OPTIONS(self):
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, HEAD, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Content-Length", "0")
         self.end_headers()
@@ -426,7 +436,18 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 return self.send_json({"success": False, "error": str(e)}, 400)
 
         if path == "/api/tunnel/start":
-            return self.send_json(self._tunnel_start())
+            provider = "auto"
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                if length > 0:
+                    body = json.loads(self.rfile.read(length).decode("utf-8"))
+                    provider = body.get("provider", "auto")
+            except Exception:
+                provider = "auto"
+            return self.send_json(self._tunnel_start(provider=provider))
+
+        if path == "/api/tunnel/stop":
+            return self.send_json(self._tunnel_stop())
 
         if path == "/api/songs":
             return self._handle_song_upload()
@@ -864,70 +885,16 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
 
         return self._send_file_stream(zip_path, download_name=dl_display_name)
 
-    # ---------------------------------------------------------- tunnel
+    # ---------------------------------------------------------- tunnel & remote access
 
     def _tunnel_status(self) -> dict:
-        global _ngrok_proc
-        running = bool(_ngrok_proc and _ngrok_proc.poll() is None)
-        public_url = None
-        try:
-            req = urllib.request.Request("http://127.0.0.1:4040/api/tunnels")
-            with urllib.request.urlopen(req, timeout=2) as r:
-                data = json.loads(r.read().decode())
-                tunnels = data.get("tunnels", [])
-                if tunnels:
-                    public_url = tunnels[0].get("public_url")
-        except Exception:
-            pass
-        return {"running": running, "public_url": public_url}
+        return _get_tunnel_status()
 
-    def _tunnel_start(self) -> dict:
-        global _ngrok_proc
-        if _ngrok_proc and _ngrok_proc.poll() is None:
-            return {**self._tunnel_status(), "message": "Tunnel zaten çalışıyor"}
+    def _tunnel_start(self, provider: str = "auto") -> dict:
+        return _start_tunnel(provider=provider)
 
-        ngrok_bin = shutil.which("ngrok")
-        if not ngrok_bin:
-            return {"running": False, "public_url": None,
-                    "error": "ngrok bulunamadı. Kurulum: pkg install ngrok"}
-
-        token = str(settings_manager.get_setting("ngrok_authtoken", "")).strip()
-        if token:
-            os.system(f"'{ngrok_bin}' config add-authtoken '{token}' >/dev/null 2>&1")
-
-        # Eski/takili kalan ngrok surecleri yeni tunnel'i engeller; temizle.
-        os.system("pkill -f 'ngrok http' >/dev/null 2>&1")
-        time.sleep(1)
-
-        ngrok_log = open(os.path.join(BASE_DIR, "storage", "ngrok.log"), "w")
-        try:
-            _ngrok_proc = subprocess.Popen(
-                [ngrok_bin, "http", str(PORT)],
-                stdout=ngrok_log, stderr=ngrok_log,
-                start_new_session=True
-            )
-        except Exception as e:
-            ngrok_log.close()
-            return {"running": False, "public_url": None, "error": str(e)}
-
-        for _ in range(12):
-            time.sleep(1)
-            st = self._tunnel_status()
-            if st.get("public_url"):
-                ngrok_log.close()
-                st["message"] = "Tunnel başlatıldı"
-                return st
-            if _ngrok_proc.poll() is not None:
-                break  # surec olmus, logdan oku
-
-        ngrok_log.close()
-        try:
-            with open(os.path.join(BASE_DIR, "storage", "ngrok.log"), "r") as f:
-                lines = [l for l in f.read().strip().splitlines() if l.strip()]
-            err_tail = lines[-1] if lines else ""
-        except OSError:
-            err_tail = ""
-        return {**st, "error": f"Tunnel başlatılamadı. {err_tail[:200]}"}
+    def _tunnel_stop(self) -> dict:
+        return _stop_tunnel()
 
     # ---------------------------------------------------------- static
 
@@ -947,22 +914,330 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         pass
 
 
+def get_local_ips() -> list[str]:
+    ips = []
+    try:
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0.2)
+        s.connect(('8.8.8.8', 80))
+        ip = s.getsockname()[0]
+        s.close()
+        if ip and ip not in ("127.0.0.1", "0.0.0.0"):
+            ips.append(ip)
+    except Exception:
+        pass
+    return ips
+
+
+def _get_chroot_prefix() -> list[str]:
+    chroot_bin = shutil.which("termux-chroot") or (
+        "/data/data/com.termux/files/usr/bin/termux-chroot"
+        if os.path.exists("/data/data/com.termux/files/usr/bin/termux-chroot")
+        else None
+    )
+    if chroot_bin and os.path.exists(chroot_bin):
+        return [chroot_bin]
+    return []
+
+
+def _get_tunnel_status() -> dict:
+    global _tunnel_proc, _tunnel_provider
+    running = bool(_tunnel_proc and _tunnel_proc.poll() is None)
+    public_url = None
+    provider = _tunnel_provider if running else None
+
+    if running:
+        if _tunnel_provider == "cloudflare":
+            log_path = os.path.join(BASE_DIR, "storage", "cloudflared.log")
+            if os.path.exists(log_path):
+                try:
+                    with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+                        txt = f.read()
+                    matches = [
+                        u.strip() for u in re.findall(r'https://[a-zA-Z0-9-]+\.trycloudflare\.com', txt)
+                        if not any(ex in u.lower() for ex in ("https://api.", "https://developers.", "https://www.api."))
+                    ]
+                    if matches:
+                        public_url = matches[-1]
+                except Exception:
+                    pass
+
+        elif _tunnel_provider == "ngrok":
+            log_path = os.path.join(BASE_DIR, "storage", "ngrok.log")
+            if os.path.exists(log_path):
+                try:
+                    with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+                        txt = f.read()
+                    matches = [
+                        u.strip() for u in re.findall(r'https://[a-zA-Z0-9-]+\.ngrok(?:-free)?\.(?:app|io)', txt)
+                        if not any(ex in u.lower() for ex in ("update.ngrok", "connect.ngrok", "dashboard.ngrok", "api.ngrok"))
+                    ]
+                    if not matches:
+                        raw_m = re.findall(r'url=(https://[^\s]+)', txt)
+                        matches = [
+                            u.strip().rstrip('"\'') for u in raw_m
+                            if not any(ex in u.lower() for ex in ("ngrok.com", "update.", "connect."))
+                        ]
+                    if matches:
+                        public_url = matches[-1]
+                except Exception:
+                    pass
+
+            if not public_url:
+                for port_candidate in (4040, 4041, 4042):
+                    try:
+                        req = urllib.request.Request(f"http://127.0.0.1:{port_candidate}/api/tunnels")
+                        with urllib.request.urlopen(req, timeout=1.5) as r:
+                            data = json.loads(r.read().decode())
+                            tunnels = data.get("tunnels", [])
+                            if tunnels:
+                                public_url = tunnels[0].get("public_url")
+                                break
+                    except Exception:
+                        pass
+    else:
+        # Harici calisan ngrok API varsa tespit et
+        for port_candidate in (4040, 4041, 4042):
+            try:
+                req = urllib.request.Request(f"http://127.0.0.1:{port_candidate}/api/tunnels")
+                with urllib.request.urlopen(req, timeout=1.0) as r:
+                    data = json.loads(r.read().decode())
+                    tunnels = data.get("tunnels", [])
+                    if tunnels:
+                        public_url = tunnels[0].get("public_url")
+                        running = True
+                        provider = "ngrok"
+                        break
+            except Exception:
+                pass
+
+    token = settings_manager.get_auth_token()
+    auth_url = f"{public_url}/?token={token}" if public_url else None
+    local_ips = get_local_ips()
+    local_urls = [f"http://{ip}:{PORT}/?token={token}" for ip in local_ips]
+
+    return {
+        "running": running,
+        "provider": provider,
+        "public_url": public_url,
+        "auth_url": auth_url,
+        "local_ips": local_ips,
+        "local_urls": local_urls,
+        "port": PORT,
+        "token": token
+    }
+
+
+def _stop_tunnel() -> dict:
+    global _tunnel_proc, _tunnel_provider, _tunnel_log_file
+    if _tunnel_proc:
+        try:
+            if _tunnel_proc.poll() is None:
+                _tunnel_proc.terminate()
+                try:
+                    _tunnel_proc.wait(timeout=2)
+                except Exception:
+                    _tunnel_proc.kill()
+        except Exception:
+            pass
+    _tunnel_proc = None
+    _tunnel_provider = "none"
+
+    if _tunnel_log_file:
+        try:
+            _tunnel_log_file.close()
+        except Exception:
+            pass
+        _tunnel_log_file = None
+
+    for f in ("cloudflared.log", "ngrok.log"):
+        p = os.path.join(BASE_DIR, "storage", f)
+        if os.path.exists(p):
+            try:
+                os.remove(p)
+            except Exception:
+                pass
+
+    os.system("pkill -9 -f 'cloudflared tunnel' >/dev/null 2>&1")
+    os.system("pkill -9 -f 'ngrok http' >/dev/null 2>&1")
+    time.sleep(0.3)
+    return {"running": False, "public_url": None, "message": "Tunnel durduruldu"}
+
+
+def _start_tunnel(provider: str = "auto") -> dict:
+    global _tunnel_proc, _tunnel_provider, _tunnel_log_file
+
+    _stop_tunnel()
+    time.sleep(0.5)
+
+    prov = (provider or "auto").lower().strip()
+    cloudflared_bin = shutil.which("cloudflared") or ("/data/data/com.termux/files/usr/bin/cloudflared" if os.path.exists("/data/data/com.termux/files/usr/bin/cloudflared") else None)
+    ngrok_bin = shutil.which("ngrok") or ("/data/data/com.termux/files/usr/bin/ngrok" if os.path.exists("/data/data/com.termux/files/usr/bin/ngrok") else None)
+
+    prefix = _get_chroot_prefix()
+
+    if prov == "auto":
+        if cloudflared_bin:
+            prov = "cloudflare"
+        elif ngrok_bin:
+            prov = "ngrok"
+        else:
+            return {
+                "running": False, "public_url": None,
+                "error": "Tunnel aracı bulunamadı! Cloudflare için 'pkg install cloudflared' veya Ngrok için 'pkg install ngrok' kurunuz."
+            }
+
+    if prov == "cloudflare":
+        if not cloudflared_bin:
+            return {
+                "running": False, "public_url": None,
+                "error": "cloudflared bulunamadı. Kurulum: pkg install cloudflared"
+            }
+
+        os.system("pkill -9 -f 'cloudflared tunnel' >/dev/null 2>&1")
+        time.sleep(0.4)
+        log_path = os.path.join(BASE_DIR, "storage", "cloudflared.log")
+        _tunnel_log_file = open(log_path, "w", encoding="utf-8")
+        try:
+            cmd = prefix + [
+                cloudflared_bin, "tunnel",
+                "--protocol", "http2",
+                "--no-autoupdate",
+                "--url", f"http://127.0.0.1:{PORT}"
+            ]
+            _tunnel_proc = subprocess.Popen(
+                cmd,
+                stdout=_tunnel_log_file, stderr=_tunnel_log_file,
+                start_new_session=True
+            )
+            _tunnel_provider = "cloudflare"
+        except Exception as e:
+            if _tunnel_log_file:
+                _tunnel_log_file.close()
+                _tunnel_log_file = None
+            return {"running": False, "public_url": None, "error": str(e)}
+
+        for _ in range(20):
+            time.sleep(1)
+            st = _get_tunnel_status()
+            if st.get("public_url"):
+                st["message"] = "Cloudflare Tunnel başarıyla başlatıldı"
+                return st
+            if _tunnel_proc.poll() is not None:
+                break
+
+        try:
+            with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+                lines = [l for l in f.read().strip().splitlines() if l.strip()]
+            err_tail = lines[-1] if lines else ""
+        except OSError:
+            err_tail = ""
+        return {**_get_tunnel_status(), "error": f"Cloudflare Tunnel başlatılamadı. {err_tail[:200]}"}
+
+    elif prov == "ngrok":
+        if not ngrok_bin:
+            return {
+                "running": False, "public_url": None,
+                "error": "ngrok bulunamadı. Kurulum: pkg install ngrok"
+            }
+
+        token = str(settings_manager.get_setting("ngrok_authtoken", "")).strip()
+        if token:
+            cfg_cmd = prefix + [ngrok_bin, "config", "add-authtoken", token]
+            subprocess.run(cfg_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        os.system("pkill -9 -f 'ngrok http' >/dev/null 2>&1")
+        time.sleep(0.4)
+        log_path = os.path.join(BASE_DIR, "storage", "ngrok.log")
+        _tunnel_log_file = open(log_path, "w", encoding="utf-8")
+        try:
+            cmd = prefix + [ngrok_bin, "http", str(PORT), "--log=stdout"]
+            _tunnel_proc = subprocess.Popen(
+                cmd,
+                stdout=_tunnel_log_file, stderr=_tunnel_log_file,
+                start_new_session=True
+            )
+            _tunnel_provider = "ngrok"
+        except Exception as e:
+            if _tunnel_log_file:
+                _tunnel_log_file.close()
+                _tunnel_log_file = None
+            return {"running": False, "public_url": None, "error": str(e)}
+
+        for _ in range(16):
+            time.sleep(1)
+            st = _get_tunnel_status()
+            if st.get("public_url"):
+                st["message"] = "Ngrok Tunnel başarıyla başlatıldı"
+                return st
+            if _tunnel_proc.poll() is not None:
+                break
+
+        try:
+            with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+                lines = [l for l in f.read().strip().splitlines() if l.strip()]
+            err_tail = lines[-1] if lines else ""
+        except OSError:
+            err_tail = ""
+        return {**_get_tunnel_status(), "error": f"Ngrok Tunnel başlatılamadı. {err_tail[:200]}"}
+
+    return {"running": False, "public_url": None, "error": f"Geçersiz tunnel sağlayıcısı: {prov}"}
+
+
 def main():
+    import argparse
+    import threading
+
+    parser = argparse.ArgumentParser(description="MoneyPrinter Turbo Lite Studio Server")
+    parser.add_argument("--host", default=os.getenv("HOST", "0.0.0.0"), help="Bağlanacak host (varsayılan: 0.0.0.0)")
+    parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "8080")), help="Bağlanacak port (varsayılan: 8080)")
+    parser.add_argument("--tunnel", choices=["none", "cloudflare", "ngrok", "auto"], default="none", help="Sunucu açılışında otomatik tünel başlat (cloudflare / ngrok / auto)")
+    parser.add_argument("--token", default=None, help="Özel kimlik doğrulama tokenı belirle")
+    args = parser.parse_args()
+
+    global PORT
+    PORT = args.port
+
     sys.path.insert(0, BASE_DIR)
     task_store.migrate_legacy_batches()
+
+    if args.token:
+        settings_manager.save_settings({"auth_token": args.token.strip()})
+
     token = settings_manager.get_auth_token()
     worker.start_worker()
 
-    socketserver.TCPServer.allow_reuse_address = True
-    server = http.server.ThreadingHTTPServer(("0.0.0.0", PORT), StudioHandler)
+    if args.tunnel != "none":
+        def _bg_tunnel():
+            time.sleep(1.5)
+            logger.info(f"🌐 Arka plan tüneli başlatılıyor ({args.tunnel})...")
+            res = _start_tunnel(provider=args.tunnel)
+            if res.get("auth_url"):
+                logger.info("=" * 65)
+                logger.info(f"🌍 GENEL TÜNEL BAĞLANTISI ({res.get('provider')}):")
+                logger.info(f"   {res['auth_url']}")
+                logger.info("=" * 65)
+            elif res.get("error"):
+                logger.warning(f"Tunnel başlatılamadı: {res['error']}")
+        threading.Thread(target=_bg_tunnel, daemon=True).start()
 
-    logger.info("=" * 60)
-    logger.info(f"🚀 MoneyPrinter Lite Studio: http://127.0.0.1:{PORT}")
-    logger.info(f"🔗 Erişim bağlantısı: http://127.0.0.1:{PORT}/?token={token}")
-    logger.info("=" * 60)
+    socketserver.TCPServer.allow_reuse_address = True
+    server = http.server.ThreadingHTTPServer((args.host, PORT), StudioHandler)
+
+    local_ips = get_local_ips()
+    logger.info("=" * 65)
+    logger.info(f"🚀 MoneyPrinter Lite Studio Başlatıldı!")
+    logger.info(f"📍 Yerel Erişim:        http://127.0.0.1:{PORT}/?token={token}")
+    for ip in local_ips:
+        logger.info(f"🌐 Sunucu / Ağ Erişimi: http://{ip}:{PORT}/?token={token}")
+    logger.info("=" * 65)
+
     try:
         server.serve_forever()
     except KeyboardInterrupt:
+        logger.info("Sunucu kapatılıyor...")
+        _stop_tunnel()
         server.shutdown()
 
 

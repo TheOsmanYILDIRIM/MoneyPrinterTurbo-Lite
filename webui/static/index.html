@@ -394,12 +394,45 @@
         </div>
         <div id="songs-list" class="songs-list mt6"><span class="muted small">Yükleniyor...</span></div>
 
-        <div class="section-title">🌐 Tunnel (Uzaktan Erişim)</div>
-        <label for="set_ngrok">Ngrok Authtoken</label>
-        <input type="password" id="set_ngrok" autocomplete="off">
-        <div class="grid-2 mt6">
-            <button class="btn-sm btn-tunnel" id="btn-tunnel-start">🌍 Tunnel Başlat</button>
-            <div id="tunnel-status" class="small muted" style="align-self:center;"></div>
+        <div class="section-title">🌐 Uzaktan Erişim & Tunnel</div>
+        <p class="hint">Sunucuya başka cihazlardan, mobil tarayıcınızdan veya uzaktaki bir ağdan bağlanmak için tünel başlatabilirsiniz.</p>
+
+        <div class="grid-2">
+            <div>
+                <label for="tunnel_provider_select">Tünel Sağlayıcı</label>
+                <select id="tunnel_provider_select">
+                    <option value="cloudflare">☁️ Cloudflare (Önerilen - Ücretsiz, Hesapsız, Anında)</option>
+                    <option value="ngrok">⚡ Ngrok (Authtoken ile)</option>
+                </select>
+            </div>
+            <div id="ngrok_token_container" class="hidden">
+                <label for="set_ngrok">Ngrok Authtoken</label>
+                <input type="password" id="set_ngrok" autocomplete="off" placeholder="Ngrok token...">
+            </div>
+        </div>
+
+        <div class="actions-row mt6">
+            <button class="btn-sm btn-tunnel" id="btn-tunnel-start">🌍 Tüneli Başlat</button>
+            <button class="btn-sm btn-del hidden" id="btn-tunnel-stop" style="max-width:none; flex:1;">⏹️ Tüneli Durdur</button>
+        </div>
+
+        <div id="tunnel-status-box" class="card mt6 p8" style="background:#090d16; border:1px solid #1e293b; border-radius:8px;">
+            <div class="meta-info">
+                <span>Tünel Durumu:</span>
+                <span id="tunnel-status-badge" class="badge">○ Kapalı</span>
+            </div>
+            <div id="tunnel-url-container" class="mt6 hidden">
+                <div class="small muted">🌍 Genel Erişim Bağlantısı (Tokenlı):</div>
+                <div class="link-row mt2">
+                    <input type="text" id="tunnel-public-url" readonly style="font-family:monospace; font-size:0.75rem; background:#0f172a; color:#38bdf8;">
+                    <button class="btn-sm btn-copy" id="btn-copy-tunnel-url">📋 Kopyala</button>
+                    <a id="btn-open-tunnel-url" href="#" target="_blank" class="btn-sm btn-download" style="max-width:60px; text-align:center;">🔗 Aç</a>
+                </div>
+            </div>
+            <div id="local-urls-container" class="mt6">
+                <div class="small muted">📍 Yerel Ağ & Sunucu IP'leri:</div>
+                <div id="local-urls-list" class="small mono mt2" style="color:#94a3b8;">Yükleniyor...</div>
+            </div>
         </div>
 
         <div class="flex-row mt12">
