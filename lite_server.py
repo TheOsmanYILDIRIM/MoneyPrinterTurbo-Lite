@@ -1261,8 +1261,23 @@ def main():
                 logger.warning(f"Tunnel başlatılamadı: {res['error']}")
         threading.Thread(target=_bg_tunnel, daemon=True).start()
 
+    # Eğer port önceki oturumdan askıda kaldıysa temizle
+    try:
+        os.system(f"fuser -k {PORT}/tcp >/dev/null 2>&1 || true")
+        time.sleep(0.3)
+    except Exception:
+        pass
+
     socketserver.TCPServer.allow_reuse_address = True
-    server = http.server.ThreadingHTTPServer((args.host, PORT), StudioHandler)
+    try:
+        server = http.server.ThreadingHTTPServer((args.host, PORT), StudioHandler)
+    except OSError as e:
+        if "Address already in use" in str(e) or getattr(e, "errno", None) == 98:
+            os.system(f"fuser -k {PORT}/tcp >/dev/null 2>&1 || true")
+            time.sleep(0.6)
+            server = http.server.ThreadingHTTPServer((args.host, PORT), StudioHandler)
+        else:
+            raise
 
     local_ips = get_local_ips()
     logger.info("=" * 65)
