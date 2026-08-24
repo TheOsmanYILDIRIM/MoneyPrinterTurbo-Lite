@@ -51,6 +51,47 @@ def get_voices_file() -> str:
     return os.environ.get("VOICES_FILE", os.path.join(get_storage_dir(), "all_voices.json"))
 
 
+def load_all_voices() -> list:
+    """Ses listesini storage/all_voices.json veya resource/all_voices.json üzerinden yükler."""
+    v_file = get_voices_file()
+    if os.path.exists(v_file):
+        try:
+            with open(v_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if data and isinstance(data, list):
+                    return data
+        except Exception:
+            pass
+
+    # 1. resource/all_voices.json (GitHub deposundaki tam ses listesi)
+    res_v = os.path.join(BASE_DIR, "resource", "all_voices.json")
+    if os.path.exists(res_v):
+        try:
+            with open(res_v, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            # storage klasörüne de kopyala
+            try:
+                os.makedirs(os.path.dirname(v_file), exist_ok=True)
+                with open(v_file, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+            except Exception:
+                pass
+            return data
+        except Exception:
+            pass
+
+    # 2. app/services/data/azure_voices.json
+    az_v = os.path.join(BASE_DIR, "app", "services", "data", "azure_voices.json")
+    if os.path.exists(az_v):
+        try:
+            with open(az_v, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+
+    return []
+
+
 def get_temp_zips_dir() -> str:
     path = os.path.join(get_storage_dir(), "temp_zips")
     os.makedirs(path, exist_ok=True)
@@ -396,14 +437,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             return self.send_json({"settings": settings_manager.get_masked_settings()})
 
         if path == "/api/voices":
-            voices = []
-            if os.path.exists(VOICES_FILE):
-                try:
-                    with open(VOICES_FILE, "r", encoding="utf-8") as f:
-                        voices = json.load(f)
-                except Exception:
-                    voices = []
-            return self.send_json({"voices": voices})
+            return self.send_json({"voices": load_all_voices()})
 
         if path == "/api/llm/providers":
             return self.send_json({"providers": llm_service.available_providers()})

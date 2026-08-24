@@ -488,11 +488,64 @@ function taskCard(t) {
 
     if (t.state === "completed" && t.video_url) {
         const vb = make("div", "video-box");
-        const video = document.createElement("video");
-        video.controls = true;
-        video.preload = "metadata";
-        video.src = t.video_url;
-        vb.appendChild(video);
+        vb.style.position = "relative";
+        vb.style.cursor = "pointer";
+        vb.style.borderRadius = "8px";
+        vb.style.overflow = "hidden";
+        vb.style.backgroundColor = "#0f172a";
+        vb.style.minHeight = "160px";
+        vb.style.display = "flex";
+        vb.style.alignItems = "center";
+        vb.style.justifyContent = "center";
+
+        const thumbUrl = t.thumbnail_url || (t.video_url ? t.video_url.replace(/\/[^\/]+$/, "/thumb.jpg") : "");
+
+        const posterImg = document.createElement("img");
+        posterImg.src = thumbUrl;
+        posterImg.loading = "lazy";
+        posterImg.alt = t.subject || "Video Önizleme";
+        posterImg.style.width = "100%";
+        posterImg.style.height = "auto";
+        posterImg.style.display = "block";
+        posterImg.style.maxHeight = "340px";
+        posterImg.style.objectFit = "cover";
+        posterImg.onerror = function() {
+            posterImg.style.display = "none";
+        };
+
+        const playBtn = make("div", "play-overlay");
+        playBtn.innerHTML = "▶";
+        playBtn.style.position = "absolute";
+        playBtn.style.fontSize = "32px";
+        playBtn.style.color = "#ffffff";
+        playBtn.style.backgroundColor = "rgba(15, 23, 42, 0.75)";
+        playBtn.style.backdropFilter = "blur(4px)";
+        playBtn.style.border = "2px solid rgba(255, 255, 255, 0.25)";
+        playBtn.style.borderRadius = "50%";
+        playBtn.style.width = "56px";
+        playBtn.style.height = "56px";
+        playBtn.style.display = "flex";
+        playBtn.style.alignItems = "center";
+        playBtn.style.justifyContent = "center";
+        playBtn.style.paddingLeft = "4px";
+        playBtn.style.boxShadow = "0 4px 16px rgba(0,0,0,0.6)";
+
+        vb.appendChild(posterImg);
+        vb.appendChild(playBtn);
+
+        vb.addEventListener("click", function startPlay() {
+            vb.removeEventListener("click", startPlay);
+            vb.innerHTML = "";
+            const video = document.createElement("video");
+            video.controls = true;
+            video.autoplay = true;
+            video.preload = "auto";
+            video.src = t.video_url;
+            video.style.width = "100%";
+            video.style.borderRadius = "8px";
+            vb.appendChild(video);
+        }, { once: true });
+
         card.appendChild(vb);
 
         const actions = make("div", "actions-row");

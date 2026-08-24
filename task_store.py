@@ -212,6 +212,8 @@ def delete_task(task_id: str) -> bool:
             return False
         task_data = tasks.pop(task_id)
         _save_db(tasks)
+
+    # 1. Görev çalışma klasörünü ve video dosyasını sil
     file_path = task_data.get("file_path")
     if file_path and os.path.exists(file_path):
         try:
@@ -219,15 +221,47 @@ def delete_task(task_id: str) -> bool:
         except Exception:
             pass
     shutil.rmtree(os.path.join(get_tasks_dir(), task_id), ignore_errors=True)
+
+    # 2. Google Drive outputs klasöründeki kopyayı da sil
+    storage_dir = get_storage_dir()
+    outputs_dir = os.environ.get("OUTPUTS_DIR", os.path.join(storage_dir, "outputs"))
+    if os.path.isdir(outputs_dir):
+        try:
+            for f in os.listdir(outputs_dir):
+                if task_id[:6] in f:
+                    fp = os.path.join(outputs_dir, f)
+                    try:
+                        os.remove(fp)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
     return True
 
 
 def delete_all_tasks() -> int:
-    """Galerideki ve veritabanındaki tüm görevleri ve dosyalarını siler."""
+    """Galerideki, veritabanındaki ve Google Drive'daki tüm görevleri ve video dosyalarını siler."""
     with _lock:
         task_ids = list(_load_db().keys())
     for tid in task_ids:
         delete_task(tid)
+
+    # outputs klasörünü tamamen temizle
+    storage_dir = get_storage_dir()
+    outputs_dir = os.environ.get("OUTPUTS_DIR", os.path.join(storage_dir, "outputs"))
+    if os.path.isdir(outputs_dir):
+        try:
+            for f in os.listdir(outputs_dir):
+                fp = os.path.join(outputs_dir, f)
+                if os.path.isfile(fp):
+                    try:
+                        os.remove(fp)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
     return len(task_ids)
 
 

@@ -206,6 +206,7 @@ def _run_task(task_id: str):
             progress=100,
             step_text="Tamamlandı",
             video_url=f"/tasks/{task_id}/{filename}",
+            thumbnail_url=f"/tasks/{task_id}/thumb.jpg",
             file_path=video_file,
             file_size_mb=file_size_mb
         )

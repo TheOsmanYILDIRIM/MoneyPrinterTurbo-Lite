@@ -1137,5 +1137,22 @@ def build_lecture_video(
         cancel_requested=cancel_requested
     )
 
+    # 6. Küçük Resim (Thumbnail) Oluşturma (~15-20 KB - WebUI & Mobil Veri Tasarrufu)
+    thumb_path = os.path.join(output_dir, "thumb.jpg")
+    try:
+        ffmpeg_bin = get_ffmpeg_binary()
+        thumb_cmd = [
+            ffmpeg_bin, "-y",
+            "-ss", "00:00:01",
+            "-i", final_output,
+            "-vframes", "1",
+            "-vf", "scale=360:-1",
+            "-q:v", "5",
+            thumb_path
+        ]
+        subprocess.run(thumb_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+    except Exception as th_err:
+        logger.debug(f"Thumbnail oluşturulamadı: {th_err}")
+
     notify(100, "Tamamlandı!")
     return final_output
