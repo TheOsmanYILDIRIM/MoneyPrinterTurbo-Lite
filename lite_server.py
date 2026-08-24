@@ -23,12 +23,48 @@ import task_store
 import worker
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TASKS_DIR = os.path.join(BASE_DIR, "storage", "tasks")
-UPLOADS_DIR = os.path.join(BASE_DIR, "storage", "uploads")
+
+
+def get_storage_dir() -> str:
+    path = os.environ.get("STORAGE_DIR", os.path.join(BASE_DIR, "storage"))
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def get_tasks_dir() -> str:
+    return task_store.get_tasks_dir()
+
+
+def get_uploads_dir() -> str:
+    path = os.environ.get("UPLOADS_DIR", os.path.join(get_storage_dir(), "uploads"))
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def get_previews_dir() -> str:
+    path = os.environ.get("PREVIEWS_DIR", os.path.join(get_storage_dir(), "previews"))
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def get_voices_file() -> str:
+    return os.environ.get("VOICES_FILE", os.path.join(get_storage_dir(), "all_voices.json"))
+
+
+def get_temp_zips_dir() -> str:
+    path = os.path.join(get_storage_dir(), "temp_zips")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+STORAGE_DIR = get_storage_dir()
+TASKS_DIR = get_tasks_dir()
+UPLOADS_DIR = get_uploads_dir()
 STATIC_DIR = os.path.join(BASE_DIR, "webui", "static")
 SONGS_DIR = os.path.join(BASE_DIR, "resource", "songs")
-PREVIEWS_DIR = os.path.join(BASE_DIR, "storage", "previews")
-VOICES_FILE = os.path.join(BASE_DIR, "storage", "all_voices.json")
+PREVIEWS_DIR = get_previews_dir()
+VOICES_FILE = get_voices_file()
+
 os.makedirs(TASKS_DIR, exist_ok=True)
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 os.makedirs(SONGS_DIR, exist_ok=True)
@@ -829,8 +865,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         # Videoları sırala (batch_index veya created_at artan sırayla)
         completed.sort(key=lambda x: (x.get("batch_index") or 0, x.get("created_at", 0)))
 
-        temp_zip_dir = os.path.join(BASE_DIR, "storage", "temp_zips")
-        os.makedirs(temp_zip_dir, exist_ok=True)
+        temp_zip_dir = get_temp_zips_dir()
 
         # 1 saatten eski geçici zip dosyalarını temizle
         try:
@@ -949,7 +984,7 @@ def _get_tunnel_status() -> dict:
 
     if running:
         if _tunnel_provider == "cloudflare":
-            log_path = os.path.join(BASE_DIR, "storage", "cloudflared.log")
+            log_path = os.path.join(get_storage_dir(), "cloudflared.log")
             if os.path.exists(log_path):
                 try:
                     with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
@@ -964,7 +999,7 @@ def _get_tunnel_status() -> dict:
                     pass
 
         elif _tunnel_provider == "ngrok":
-            log_path = os.path.join(BASE_DIR, "storage", "ngrok.log")
+            log_path = os.path.join(get_storage_dir(), "ngrok.log")
             if os.path.exists(log_path):
                 try:
                     with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
@@ -1052,7 +1087,7 @@ def _stop_tunnel() -> dict:
         _tunnel_log_file = None
 
     for f in ("cloudflared.log", "ngrok.log"):
-        p = os.path.join(BASE_DIR, "storage", f)
+        p = os.path.join(get_storage_dir(), f)
         if os.path.exists(p):
             try:
                 os.remove(p)
@@ -1097,7 +1132,7 @@ def _start_tunnel(provider: str = "auto") -> dict:
 
         os.system("pkill -9 -f 'cloudflared tunnel' >/dev/null 2>&1")
         time.sleep(0.4)
-        log_path = os.path.join(BASE_DIR, "storage", "cloudflared.log")
+        log_path = os.path.join(get_storage_dir(), "cloudflared.log")
         _tunnel_log_file = open(log_path, "w", encoding="utf-8")
         try:
             cmd = prefix + [
@@ -1149,7 +1184,7 @@ def _start_tunnel(provider: str = "auto") -> dict:
 
         os.system("pkill -9 -f 'ngrok http' >/dev/null 2>&1")
         time.sleep(0.4)
-        log_path = os.path.join(BASE_DIR, "storage", "ngrok.log")
+        log_path = os.path.join(get_storage_dir(), "ngrok.log")
         _tunnel_log_file = open(log_path, "w", encoding="utf-8")
         try:
             cmd = prefix + [ngrok_bin, "http", str(PORT), "--log=stdout"]
@@ -1194,19 +1229,23 @@ def main():
     parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "8080")), help="Bağlanacak port (varsayılan: 8080)")
     parser.add_argument("--tunnel", choices=["none", "cloudflare", "ngrok", "auto"], default="none", help="Sunucu açılışında otomatik tünel başlat (cloudflare / ngrok / auto)")
     parser.add_argument("--token", default=None, help="Özel kimlik doğrulama tokenı belirle")
+    parser.add_argument("--storage-dir", default=None, help="Özel depolama ve Google Drive klasörü (varsayılan: storage)")
+    parser.add_argument("--auto-resume", action="store_true", help="Açılışta yarım kalan görevleri otomatik olarak devam ettir")
     args = parser.parse_args()
+
+    if args.storage_dir:
+        os.environ["STORAGE_DIR"] = os.path.abspath(args.storage_dir)
 
     global PORT
     PORT = args.port
 
     sys.path.insert(0, BASE_DIR)
-    task_store.migrate_legacy_batches()
 
     if args.token:
         settings_manager.save_settings({"auth_token": args.token.strip()})
 
     token = settings_manager.get_auth_token()
-    worker.start_worker()
+    worker.start_worker(auto_resume=args.auto_resume)
 
     if args.tunnel != "none":
         def _bg_tunnel():
@@ -1228,6 +1267,7 @@ def main():
     local_ips = get_local_ips()
     logger.info("=" * 65)
     logger.info(f"🚀 MoneyPrinter Lite Studio Başlatıldı!")
+    logger.info(f"📁 Depolama Dizini:     {get_storage_dir()}")
     logger.info(f"📍 Yerel Erişim:        http://127.0.0.1:{PORT}/?token={token}")
     for ip in local_ips:
         logger.info(f"🌐 Sunucu / Ağ Erişimi: http://{ip}:{PORT}/?token={token}")

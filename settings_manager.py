@@ -5,7 +5,21 @@ import threading
 from typing import Any, Dict
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-SETTINGS_FILE = os.path.join(BASE_DIR, "storage", "settings.json")
+
+
+def get_storage_dir() -> str:
+    path = os.environ.get("STORAGE_DIR", os.path.join(BASE_DIR, "storage"))
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def get_settings_file() -> str:
+    return os.environ.get("SETTINGS_FILE", os.path.join(get_storage_dir(), "settings.json"))
+
+
+# Geriye dönük uyumluluk için değişkenler
+STORAGE_DIR = get_storage_dir()
+SETTINGS_FILE = get_settings_file()
 _lock = threading.RLock()
 
 DEFAULT_SETTINGS: Dict[str, Any] = {
@@ -14,7 +28,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "pixabay_api_keys": "",
     "coverr_api_keys": "",
 
-    # LLM (gelecek genisletme icin)
+    # LLM
     "openai_api_key": "",
     "openai_base_url": "https://api.openai.com/v1",
     "openai_model_name": "gpt-4o-mini",
@@ -60,17 +74,25 @@ SECRET_KEYS = {
 
 def load_settings() -> Dict[str, Any]:
     with _lock:
-        if not os.path.exists(SETTINGS_FILE):
-            data = {}
+        settings_file = get_settings_file()
+        if not os.path.exists(settings_file):
+            # Dosya yoksa varsayılan ayarlarla otomatik oluştur
+            try:
+                os.makedirs(os.path.dirname(settings_file), exist_ok=True)
+                with open(settings_file, "w", encoding="utf-8") as f:
+                    json.dump(DEFAULT_SETTINGS, f, ensure_ascii=False, indent=2)
+            except Exception as e:
+                print(f"Uyarı: settings.json oluşturulamadı: {e}")
+            return DEFAULT_SETTINGS.copy()
         else:
             try:
-                with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                with open(settings_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
             except Exception:
                 data = {}
-        res = DEFAULT_SETTINGS.copy()
-        res.update({k: v for k, v in data.items() if k in res})
-        return res
+            res = DEFAULT_SETTINGS.copy()
+            res.update({k: v for k, v in data.items() if k in res})
+            return res
 
 
 def save_settings(new_settings: Dict[str, Any]) -> Dict[str, Any]:
@@ -85,11 +107,12 @@ def save_settings(new_settings: Dict[str, Any]) -> Dict[str, Any]:
                     continue
             current[key] = value
 
-        os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
-        tmp_path = SETTINGS_FILE + ".tmp"
+        settings_file = get_settings_file()
+        os.makedirs(os.path.dirname(settings_file), exist_ok=True)
+        tmp_path = settings_file + ".tmp"
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(current, f, ensure_ascii=False, indent=2)
-        os.replace(tmp_path, SETTINGS_FILE)
+        os.replace(tmp_path, settings_file)
 
         ngrok_token = str(current.get("ngrok_authtoken", "")).strip()
         if ngrok_token:
@@ -100,9 +123,8 @@ def save_settings(new_settings: Dict[str, Any]) -> Dict[str, Any]:
 
 def mask_secret(value: Any) -> str:
     s = str(value or "")
-    if len(s) <= 8:
-        return "*" * len(s) if s else ""
-    return f"{s[:4]}...{s[-4:]}"
+    return f"{s[:4]}...{s[-4:]}" if len(s) > 8 else ("*" * len(s) if s else "")
+
 
 
 def get_masked_settings() -> Dict[str, Any]:

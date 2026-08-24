@@ -1,12 +1,32 @@
 import json
 import os
+import shutil
 import threading
 import time
 from typing import Dict, List, Optional
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_FILE = os.path.join(BASE_DIR, "storage", "tasks_db.json")
-os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
+
+
+def get_storage_dir() -> str:
+    path = os.environ.get("STORAGE_DIR", os.path.join(BASE_DIR, "storage"))
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def get_db_file() -> str:
+    return os.environ.get("TASKS_DB_FILE", os.path.join(get_storage_dir(), "tasks_db.json"))
+
+
+def get_tasks_dir() -> str:
+    path = os.environ.get("TASKS_DIR", os.path.join(get_storage_dir(), "tasks"))
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+STORAGE_DIR = get_storage_dir()
+DB_FILE = get_db_file()
+TASKS_DIR = get_tasks_dir()
 _lock = threading.RLock()
 
 ACTIVE_STATES = ("queued", "processing")
@@ -15,10 +35,11 @@ TERMINAL_STATES = ("completed", "failed", "interrupted")
 
 def _load_db() -> Dict[str, dict]:
     with _lock:
-        if not os.path.exists(DB_FILE):
+        db_file = get_db_file()
+        if not os.path.exists(db_file):
             return {}
         try:
-            with open(DB_FILE, "r", encoding="utf-8") as f:
+            with open(db_file, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
             print(f"Hata task_store load: {e}")
@@ -27,30 +48,15 @@ def _load_db() -> Dict[str, dict]:
 
 def _save_db(data: Dict[str, dict]):
     with _lock:
-        tmp_path = DB_FILE + ".tmp"
+        db_file = get_db_file()
+        os.makedirs(os.path.dirname(db_file), exist_ok=True)
+        tmp_path = db_file + ".tmp"
         try:
             with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False)
-            os.replace(tmp_path, DB_FILE)
+            os.replace(tmp_path, db_file)
         except Exception as e:
             print(f"Hata task_store save: {e}")
-
-
-def migrate_legacy_batches():
-    with _lock:
-        tasks = _load_db()
-        changed = False
-        legacy_clusters = {}
-        for tid, t in tasks.items():
-            if not t.get("batch_id") and t.get("batch_total"):
-                c_time = int(t.get("created_at", 0))
-                bucket = (c_time // 120, t.get("batch_total"))
-                if bucket not in legacy_clusters:
-                    legacy_clusters[bucket] = f"batch_legacy_{bucket[0]}_{bucket[1]}"
-                t["batch_id"] = legacy_clusters[bucket]
-                changed = True
-        if changed:
-            _save_db(tasks)
 
 
 def create_task(task_id: str, subject: str = "Ders", script: str = "", voice: str = "tr-TR-AhmetNeural",
@@ -182,59 +188,47 @@ def mark_interrupted_on_startup():
         _save_db(tasks)
 
 
+def resume_interrupted_tasks() -> int:
+    """Yarım kalan (interrupted/processing) görevleri tekrar 'queued' durumuna alarak devam ettirir."""
+    with _lock:
+        tasks = _load_db()
+        count = 0
+        for t in tasks.values():
+            if t.get("state") in ("interrupted", "processing"):
+                t["state"] = "queued"
+                t["progress"] = 5
+                t["step_text"] = "Kaldığı yerden devam etmek üzere kuyruğa alındı"
+                t["error"] = None
+                count += 1
+        if count > 0:
+            _save_db(tasks)
+        return count
+
+
 def delete_task(task_id: str) -> bool:
-    tasks = _load_db()
-    if task_id not in tasks:
-        return False
-    task_data = tasks.pop(task_id)
-    _save_db(tasks)
+    with _lock:
+        tasks = _load_db()
+        if task_id not in tasks:
+            return False
+        task_data = tasks.pop(task_id)
+        _save_db(tasks)
     file_path = task_data.get("file_path")
     if file_path and os.path.exists(file_path):
         try:
             os.remove(file_path)
         except Exception:
             pass
-    task_dir = os.path.join(BASE_DIR, "storage", "tasks", task_id)
-    if os.path.isdir(task_dir):
-        try:
-            for fname in os.listdir(task_dir):
-                try:
-                    os.remove(os.path.join(task_dir, fname))
-                except Exception:
-                    pass
-            os.rmdir(task_dir)
-        except Exception:
-            pass
+    shutil.rmtree(os.path.join(get_tasks_dir(), task_id), ignore_errors=True)
     return True
 
 
 def delete_all_tasks() -> int:
     """Galerideki ve veritabanındaki tüm görevleri ve dosyalarını siler."""
     with _lock:
-        tasks = _load_db()
-        count = len(tasks)
-        task_ids = list(tasks.keys())
-        for tid in task_ids:
-            task_data = tasks.pop(tid, {})
-            file_path = task_data.get("file_path")
-            if file_path and os.path.exists(file_path):
-                try:
-                    os.remove(file_path)
-                except Exception:
-                    pass
-            task_dir = os.path.join(BASE_DIR, "storage", "tasks", tid)
-            if os.path.isdir(task_dir):
-                try:
-                    for fname in os.listdir(task_dir):
-                        try:
-                            os.remove(os.path.join(task_dir, fname))
-                        except Exception:
-                            pass
-                    os.rmdir(task_dir)
-                except Exception:
-                    pass
-        _save_db(tasks)
-        return count
+        task_ids = list(_load_db().keys())
+    for tid in task_ids:
+        delete_task(tid)
+    return len(task_ids)
 
 
 def delete_batch(batch_id: str) -> int:

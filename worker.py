@@ -9,7 +9,11 @@ import task_store
 from lite_engine import build_lecture_video, resolve_video_dimensions, TaskCancelled
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TASKS_DIR = os.path.join(BASE_DIR, "storage", "tasks")
+
+
+def get_tasks_dir() -> str:
+    return task_store.get_tasks_dir()
+
 
 _wake = threading.Event()
 _thread: Optional[threading.Thread] = None
@@ -104,7 +108,8 @@ def _run_task(task_id: str):
     if not task:
         return
 
-    task_dir = os.path.join(TASKS_DIR, task_id)
+    tasks_base = get_tasks_dir()
+    task_dir = os.path.join(tasks_base, task_id)
     os.makedirs(task_dir, exist_ok=True)
 
     subject = task.get("subject", "Ders")
@@ -133,7 +138,7 @@ def _run_task(task_id: str):
     reuse_cues = os.path.join(task_dir, "subtitle_cues.json")
     parent = task.get("parent_task_id")
     if parent and task.get("regenerate_mode") in ("visuals", "subtitles"):
-        cand = os.path.join(TASKS_DIR, parent, "subtitle_cues.json")
+        cand = os.path.join(tasks_base, parent, "subtitle_cues.json")
         if os.path.exists(cand):
             reuse_cues = cand
 
@@ -181,6 +186,19 @@ def _run_task(task_id: str):
         file_size_mb = 0.0
         if os.path.exists(video_file):
             file_size_mb = round(os.path.getsize(video_file) / (1024 * 1024), 2)
+            # İsteğe bağlı olarak Drive/outputs klasörüne de kopyala / bağla
+            storage_dir = task_store.get_storage_dir()
+            outputs_dir = os.environ.get("OUTPUTS_DIR", os.path.join(storage_dir, "outputs"))
+            try:
+                os.makedirs(outputs_dir, exist_ok=True)
+                import re
+                clean_subject = re.sub(r'[^\w\-_ ]+', '_', subject)[:40].strip()
+                out_copy_name = f"{clean_subject}_{task_id[:6]}.mp4"
+                out_copy_path = os.path.join(outputs_dir, out_copy_name)
+                import shutil
+                shutil.copy2(video_file, out_copy_path)
+            except Exception as copy_err:
+                logger.debug(f"Outputs kopyalama atlandı: {copy_err}")
 
         task_store.update_task(
             task_id,
@@ -232,11 +250,15 @@ def _worker_loop():
                 CANCEL_FLAGS.discard(tid)
 
 
-def start_worker():
+def start_worker(auto_resume: bool = False):
     global _thread
     if _thread and _thread.is_alive():
         return
     task_store.mark_interrupted_on_startup()
+    if auto_resume or os.environ.get("AUTO_RESUME", "").lower() in ("1", "true", "yes"):
+        resumed = task_store.resume_interrupted_tasks()
+        if resumed > 0:
+            logger.info(f"Yarım kalan / bekleyen {resumed} görev otomatik olarak tekrar kuyruğa alındı.")
     _thread = threading.Thread(target=_worker_loop, name="job-worker", daemon=True)
     _thread.start()
     _wake.set()

@@ -103,24 +103,18 @@ def parse_batch_text(content: str) -> List[Dict[str, str]]:
 
 def _normalize_item(item: Dict[str, str]) -> Dict[str, str]:
     """Ana projenin alan adlarini da kabul eder (video_subject, video_script...)."""
-    low = {}
-    for k, v in item.items():
-        if isinstance(v, list):
-            low[str(k).lower()] = ", ".join(str(x) for x in v)
-        elif isinstance(v, (str, int, float)):
-            low[str(k).lower()] = str(v)
+    low = {str(k).lower(): (", ".join(str(x) for x in v) if isinstance(v, list) else str(v)) for k, v in item.items()}
     return {
-        "subject": str(low.get("subject") or low.get("video_subject")
-                       or low.get("title") or "").strip(),
-        "script": str(low.get("script") or low.get("video_script")
-                      or low.get("text") or "").strip(),
-        "voice": str(low.get("voice") or low.get("ses") or low.get("speaker") or low.get("seslendirmen") or "").strip(),
-        "pexels_query": str(low.get("pexels_query") or low.get("video_terms")
-                            or low.get("keywords") or low.get("terms") or "").strip(),
+        "subject": (low.get("subject") or low.get("video_subject") or low.get("title") or "").strip(),
+        "script": (low.get("script") or low.get("video_script") or low.get("text") or "").strip(),
+        "voice": (low.get("voice") or low.get("ses") or low.get("speaker") or low.get("seslendirmen") or "").strip(),
+        "pexels_query": (low.get("pexels_query") or low.get("video_terms") or low.get("keywords") or low.get("terms") or low.get("tags") or "").strip(),
+
         "highlight_words": low.get("highlight_words") or low.get("highlight") or low.get("vurgu") or low.get("vurgulanan") or "",
         "highlight_color": low.get("highlight_color") or low.get("vurgu_renk") or "",
         "highlight_size": low.get("highlight_size") or ""
     }
+
 
 
 def parse_batch_input(input_path_or_content: str) -> List[Dict[str, str]]:
@@ -257,10 +251,6 @@ def create_batch_tasks(items: List[Dict[str, str]],
         )["task_id"]
         task_ids.append(task_id)
 
-    _wake_worker()
+    worker._wake.set()
     return task_ids
 
-
-def _wake_worker():
-    # dairesel importu onlemek icin gec cagri
-    worker._wake.set()

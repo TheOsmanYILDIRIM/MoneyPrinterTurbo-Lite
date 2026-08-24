@@ -154,16 +154,11 @@ Generate {amount} search terms for stock videos, depending on the subject of a v
 Please note that you must use English for generating video search terms; Chinese is not accepted.
 """.strip()
 
-    raw = chat_completion(provider, model, prompt)
-    raw = raw.strip()
-    if raw.startswith("```"):
-        raw = re.sub(r"^```[a-zA-Z0-9]*\s*", "", raw)
-        raw = re.sub(r"\s*```$", "", raw).strip()
-    start, end = raw.find("["), raw.rfind("]")
-    if start != -1 and end > start:
-        raw = raw[start:end + 1]
-    terms = json.loads(raw)
+    raw = chat_completion(provider, model, prompt).strip()
+    match = re.search(r"\[.*\]", raw, re.DOTALL)
+    terms = json.loads(match.group(0) if match else raw)
     return [str(t).strip() for t in terms if str(t).strip()][:amount]
+
 
 
 def list_models(provider: str) -> List[Dict[str, str]]:
