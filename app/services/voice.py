@@ -631,16 +631,14 @@ def create_edge_tts_communicate(
 ) -> edge_tts.Communicate:
     """
     按当前已安装的 edge_tts 版本构造 Communicate 对象。
-
-    背景：
-    1. 主线代码已经升级到 edge_tts 7.x，并使用 `boundary` 参数拿到更细的边界事件；
-    2. 但 Windows 便携包如果更新失败，现场环境可能仍然停留在旧版 edge_tts；
-    3. 旧版 `Communicate.__init__()` 不接受 `boundary`，会直接抛出
-       `unexpected keyword argument 'boundary'`，导致整个 TTS 链路失败。
-
-    因此这里先根据构造函数签名探测当前版本支持的参数，再决定是否传入
-    `boundary`，让同一份代码同时兼容旧版和新版依赖。
+    Multilingual seslerin dili şaşırıp Fransızca vb. okumasını önler.
     """
+    v_clean = (voice_name or "").strip()
+    if text and any(c in text for c in "çğıöşüÇĞİÖŞÜ"):
+        if "multilingual" in v_clean.lower() or not v_clean.startswith("tr-TR"):
+            is_fem = any(fem in v_clean.lower() for fem in ("emel", "female", "woman", "ava", "emma", "jenny", "vivienne", "seraphina"))
+            voice_name = "tr-TR-EmelNeural" if is_fem else "tr-TR-AhmetNeural"
+
     communicate_kwargs = {"rate": rate_str}
     communicate_signature = inspect.signature(edge_tts.Communicate)
 

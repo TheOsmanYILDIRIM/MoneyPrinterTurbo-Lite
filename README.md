@@ -1,12 +1,13 @@
 # ⚡ MoneyPrinterTurbo Lite
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/TheOsmanYILDIRIM/MoneyPrinterTurbo-Lite/blob/main/MoneyPrinterTurbo_Colab.ipynb)
+[![Kaggle](https://kaggle.com/static/images/open-in-kaggle.svg)](MoneyPrinterTurbo_Kaggle.ipynb)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-Termux%20%7C%20Linux%20%7C%20Colab-brightgreen.svg)]()
+[![Platform](https://img.shields.io/badge/Platform-Termux%20%7C%20Linux%20%7C%20Colab%20%7C%20Kaggle-brightgreen.svg)]()
 
-> **Termux (Android Linux), ARM64, Google Colab ve Düşük Kaynaklı Ortamlar için Optimize Edilmiş Ultra Hafif AI Video Üretim Stüdyosu & Motoru**
+> **Termux (Android Linux), ARM64, Google Colab, Kaggle GPU ve Düşük Kaynaklı Ortamlar için Optimize Edilmiş Ultra Hafif AI Video Üretim Stüdyosu & Motoru**
 
-MoneyPrinterTurbo Lite, orijinal MoneyPrinterTurbo'nun ağır bağımlılıklarından arındırılmış, mobil cihazlarda (Termux), bulutta (Google Colab) ve düşük donanımlı sunucularda minimum CPU ve RAM tüketimiyle çalışan, yüksek performanslı ve tam otomatik bir yapay zeka video üretim motorudur.
+MoneyPrinterTurbo Lite, orijinal MoneyPrinterTurbo'nun ağır bağımlılıklarından arındırılmış, mobil cihazlarda (Termux), bulutta (Google Colab, Kaggle) ve düşük donanımlı sunucularda minimum CPU ve RAM tüketimiyle çalışan, yüksek performanslı ve tam otomatik bir yapay zeka video üretim motorudur.
 
 ---
 
@@ -15,7 +16,7 @@ MoneyPrinterTurbo Lite, orijinal MoneyPrinterTurbo'nun ağır bağımlılıklar�
 - 🚀 **Ultra Hafif & Hızlı:** Starlette & Uvicorn tabanlı hafif mimari. Ağır kütüphaneler yerine optimize MoviePy/FFmpeg pipeline'ı.
 - 📺 **4K Ultra HD & Çoklu Çözünürlük:** 4K UHD (2160p), 2K QHD (1440p), 1080p Full HD, 720p HD ve 480p SD çözünürlük desteği (9:16 Dikey, 16:9 Yatay, 1:1 Kare).
 - 📱 **Mobil & Termux Uyumlu:** Android Termux üzerinde sıfır çökme, düşük bellek kullanımı ve donanım dostu hızlı video render.
-- ☁️ **Google Colab Desteği:** `MoneyPrinterTurbo_Colab.ipynb` ile Ngrok / Cloudflare tünelleri üzerinden tek tıkla GPU destekli çalıştırma.
+- ☁️ **Google Colab & Kaggle Desteği:** `MoneyPrinterTurbo_Colab.ipynb` ve `MoneyPrinterTurbo_Kaggle.ipynb` ile Ngrok / Cloudflare tünelleri üzerinden tek tıkla GPU destekli çalıştırma.
 - 🎙️ **Dahili Edge TTS:** Çoklu dil ve doğal ses seçenekleriyle (Türkçe dahil yüzlerce ses) ücretsiz, yüksek kaliteli seslendirme.
 - 🧠 **Çoklu LLM Entegrasyonu:** OpenAI, DeepSeek, Google Gemini, Anthropic Claude, Groq ve yerel modeller ile tam otomatik senaryo ve görsel arama terimi üretimi.
 - 🎬 **Akıllı Montaj & Çoklu Stok Video:** Sahne bazlı Pexels video arama motoru ile her sahneye uygun farklı videolar indirme ve yumuşak geçiş (Crossfade) efektleri.
@@ -34,6 +35,7 @@ MoneyPrinterTurbo-Lite/
 ├── resource/                       # Dahili fontlar ve arka plan müzikleri (BGM)
 ├── webui/                          # Web stüdyosu arayüzü ve dil dosyaları
 ├── MoneyPrinterTurbo_Colab.ipynb   # Google Colab çalıştırma notebook'u
+├── MoneyPrinterTurbo_Kaggle.ipynb  # Kaggle GPU çalıştırma notebook'u
 ├── lite_engine.py                  # 4K & çoklu video destekli render motoru
 ├── lite_server.py                  # Starlette tabanlı REST API ve web sunucusu
 ├── batch_engine.py                 # Toplu video işleme motoru
@@ -51,8 +53,9 @@ MoneyPrinterTurbo-Lite/
 
 ## 🚀 Hızlı Başlangıç
 
-### 1. Google Colab ile Çalıştırma (En Kolay & Hızlı)
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/TheOsmanYILDIRIM/MoneyPrinterTurbo-Lite/blob/main/MoneyPrinterTurbo_Colab.ipynb) butonuna tıklayın ve hücreleri sırayla çalıştırın. Ngrok veya Cloudflare üzerinden anında erişin!
+### 1. Google Colab veya Kaggle ile Çalıştırma (Bulut & GPU)
+- **Google Colab:** [`MoneyPrinterTurbo_Colab.ipynb`](MoneyPrinterTurbo_Colab.ipynb) notebook'unu açın ve hücreleri sırayla çalıştırın.
+- **Kaggle GPU:** [`MoneyPrinterTurbo_Kaggle.ipynb`](MoneyPrinterTurbo_Kaggle.ipynb) notebook'unu Kaggle'a yükleyin (GPU T4/P100 & Internet On) ve çalıştırın.
 
 ---
 

@@ -13,14 +13,28 @@ import shutil
 from typing import Dict, Any, Optional, List
 
 
-DEFAULT_DRIVE_DIR = "/content/drive/MyDrive/MoneyPrinterTurbo"
+def get_default_storage_dir() -> str:
+    """Ortama göre varsayılan kalıcı depolama klasörünü belirler (Colab, Kaggle, Local)."""
+    if os.environ.get("STORAGE_DIR"):
+        return os.environ["STORAGE_DIR"]
+    if os.path.exists("/content"):  # Google Colab
+        return "/content/drive/MyDrive/MoneyPrinterTurbo"
+    if os.path.exists("/kaggle"):   # Kaggle
+        return "/kaggle/working/MoneyPrinterTurbo"
+    repo_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(repo_dir, "storage")
 
 
-def init_drive_environment(drive_dir: str = DEFAULT_DRIVE_DIR) -> Dict[str, str]:
+DEFAULT_DRIVE_DIR = get_default_storage_dir()
+
+
+def init_drive_environment(drive_dir: Optional[str] = None) -> Dict[str, str]:
     """
-    Google Drive üzerindeki çalışma klasörlerini hazırlar,
-    ortam değişkenlerini ayarlar ve storage dizinini Google Drive'a bağlar.
+    Google Drive / Kaggle / Yerel çalışma klasörlerini hazırlar,
+    ortam değişkenlerini ayarlar ve storage dizinini bağlar.
     """
+    if not drive_dir:
+        drive_dir = get_default_storage_dir()
     drive_dir = os.path.abspath(drive_dir)
     tasks_dir = os.path.join(drive_dir, "tasks")
     outputs_dir = os.path.join(drive_dir, "outputs")
@@ -47,26 +61,27 @@ def init_drive_environment(drive_dir: str = DEFAULT_DRIVE_DIR) -> Dict[str, str]
     # Yerel repo içindeki storage klasörünü Drive'a sembolik bağla (varsa yedekle)
     repo_dir = os.path.dirname(os.path.abspath(__file__))
     local_storage = os.path.join(repo_dir, "storage")
-    if os.path.exists(local_storage) and not os.path.islink(local_storage):
-        try:
-            # İçinde veri varsa Drive'a taşı/kopyala
-            for item in os.listdir(local_storage):
-                src = os.path.join(local_storage, item)
-                dst = os.path.join(drive_dir, item)
-                if not os.path.exists(dst):
-                    if os.path.isdir(src):
-                        shutil.copytree(src, dst)
-                    else:
-                        shutil.copy2(src, dst)
-            shutil.rmtree(local_storage, ignore_errors=True)
-            os.symlink(drive_dir, local_storage)
-        except Exception as e:
-            print(f"Bilgi: Symlink oluşturulamadı ({e}), STORAGE_DIR ortam değişkeni kullanılacak.")
-    elif not os.path.exists(local_storage):
-        try:
-            os.symlink(drive_dir, local_storage)
-        except Exception:
-            pass
+    if drive_dir != local_storage:
+        if os.path.exists(local_storage) and not os.path.islink(local_storage):
+            try:
+                # İçinde veri varsa Drive'a taşı/kopyala
+                for item in os.listdir(local_storage):
+                    src = os.path.join(local_storage, item)
+                    dst = os.path.join(drive_dir, item)
+                    if not os.path.exists(dst):
+                        if os.path.isdir(src):
+                            shutil.copytree(src, dst)
+                        else:
+                            shutil.copy2(src, dst)
+                shutil.rmtree(local_storage, ignore_errors=True)
+                os.symlink(drive_dir, local_storage)
+            except Exception as e:
+                print(f"Bilgi: Symlink oluşturulamadı ({e}), STORAGE_DIR ortam değişkeni kullanılacak.")
+        elif not os.path.exists(local_storage):
+            try:
+                os.symlink(drive_dir, local_storage)
+            except Exception:
+                pass
 
     # Ayarlar dosyasını kontrol et ve yoksa oluştur
     _ensure_settings_file(settings_file)

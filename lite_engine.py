@@ -708,6 +708,19 @@ def fetch_pexels_video(query: str, orientation: str = "portrait", output_path: s
     return None
 
 
+def resolve_edge_tts_voice(voice: str, text: str) -> str:
+    """
+    Multilingual modellerin dili şaşırıp Fransızca/İspanyolca okumasını önler.
+    Metinde Türkçe karakterler varsa veya ses Multilingual ise yerel güvenilir sese yönlendirir.
+    """
+    v_clean = (voice or "").strip()
+    if any(c in text for c in "çğıöşüÇĞİÖŞÜ"):
+        if "multilingual" in v_clean.lower() or not v_clean.startswith("tr-TR"):
+            is_fem = any(fem in v_clean.lower() for fem in ("emel", "female", "woman", "ava", "emma", "jenny", "vivienne", "seraphina"))
+            return "tr-TR-EmelNeural" if is_fem else "tr-TR-AhmetNeural"
+    return v_clean or "tr-TR-AhmetNeural"
+
+
 async def generate_speech_edge(
     text: str,
     output_path: str,
@@ -724,7 +737,14 @@ async def generate_speech_edge(
     vol_str = f"{int((volume - 1.0) * 100):+d}%"
 
     clean_text = strip_formatting_tags(text)
-    communicate = edge_tts.Communicate(clean_text, voice, rate=rate_str, volume=vol_str)
+    safe_voice = resolve_edge_tts_voice(voice, clean_text)
+
+    communicate_kwargs = {"rate": rate_str, "volume": vol_str}
+    try:
+        communicate = edge_tts.Communicate(clean_text, safe_voice, boundary="WordBoundary", **communicate_kwargs)
+    except TypeError:
+        communicate = edge_tts.Communicate(clean_text, safe_voice, **communicate_kwargs)
+
     submaker = edge_tts.SubMaker()
 
     with open(output_path, "wb") as f:
@@ -740,7 +760,8 @@ async def generate_speech_edge(
     for c in submaker.cues:
         start_s = c.start.total_seconds()
         end_s = c.end.total_seconds()
-        raw_cues.append((start_s, end_s, c.value))
+        val = getattr(c, "content", getattr(c, "value", getattr(c, "text", "")))
+        raw_cues.append((start_s, end_s, val))
 
     # Cues boşsa süreye göre tahmini böl
     if not raw_cues:
