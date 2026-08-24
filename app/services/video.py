@@ -1214,7 +1214,17 @@ def generate_video(
                 )
             )
             text_clips = []
-            for item in sub.subtitles:
+            cleaned_subtitles = []
+            for i, item in enumerate(sub.subtitles):
+                (st, et), txt = item[0], item[1]
+                if i + 1 < len(sub.subtitles):
+                    next_st = sub.subtitles[i + 1][0][0]
+                    if et > next_st:
+                        et = max(st + 0.05, next_st - 0.02)
+                if et > st:
+                    cleaned_subtitles.append(((st, et), txt))
+
+            for item in cleaned_subtitles:
                 clip = create_text_clip(subtitle_item=item)
                 text_clips.append(clip)
             video_clip = CompositeVideoClip([video_clip, *text_clips])

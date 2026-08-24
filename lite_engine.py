@@ -342,11 +342,13 @@ def write_ass_subtitles(cues: List[Tuple[float, float, str]], path: str,
         margin_v = round(height * (0.10 if height > width else 0.08))
 
     if boxed:
-        ass_outline_color = "&H96000000"  # yarı saydam siyah kutu
-        ass_outline_w = round(m["fontsize"] * 0.22)
+        ass_outline_color = "&H80000000"  # %50 yarı saydam tek katman arka plan
+        back_color = "&HFF000000"         # İkincil gölge/kutu katmanı tamamen şeffaf (koyulaşmayı önler)
+        ass_outline_w = max(2, round(m["fontsize"] * 0.16))
         shadow_w = 0
     else:
         ass_outline_color = hex_to_ass_color(outline_color or "#000000", "00")
+        back_color = "&H80000000"
         ass_outline_w = outline_width if outline_width is not None else m["outline"]
         shadow_w = 1
 
@@ -359,13 +361,25 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Sub,{font_name},{m['fontsize']},{primary},&H000000FF,{ass_outline_color},&H80000000,{bold_flag},0,0,0,100,100,0,0,{m['border_style']},{ass_outline_w},{shadow_w},{alignment},{m['margin_lr']},{m['margin_lr']},{margin_v},1
+Style: Sub,{font_name},{m['fontsize']},{primary},&H000000FF,{ass_outline_color},{back_color},{bold_flag},0,0,0,100,100,0,0,{m['border_style']},{ass_outline_w},{shadow_w},{alignment},{m['margin_lr']},{m['margin_lr']},{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     lines = [header]
-    for start, end, text in cues:
+
+    # Altyazıların üst üste binip çift katmanlı koyulaşma (alpha stacking) yapmasını engelle
+    sorted_cues = sorted([c for c in cues if c[2] and c[2].strip()], key=lambda x: x[0])
+    cleaned_cues = []
+    for i, (start, end, text) in enumerate(sorted_cues):
+        if i + 1 < len(sorted_cues):
+            next_start = sorted_cues[i + 1][0]
+            if end > next_start:
+                end = max(start + 0.05, next_start - 0.02)
+        if end > start:
+            cleaned_cues.append((start, end, text))
+
+    for start, end, text in cleaned_cues:
         raw_text = text.replace("\n", " ").strip()
         if not raw_text:
             continue
