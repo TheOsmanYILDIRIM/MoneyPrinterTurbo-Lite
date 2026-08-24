@@ -1247,10 +1247,31 @@ def main():
     token = settings_manager.get_auth_token()
     worker.start_worker(auto_resume=args.auto_resume)
 
+    global PORT
+    requested_port = args.port
+
+    server = None
+    actual_port = requested_port
+    socketserver.TCPServer.allow_reuse_address = True
+
+    for p in range(requested_port, requested_port + 20):
+        try:
+            server = http.server.ThreadingHTTPServer((args.host, p), StudioHandler)
+            actual_port = p
+            break
+        except OSError:
+            continue
+
+    if server is None:
+        server = http.server.ThreadingHTTPServer((args.host, requested_port), StudioHandler)
+        actual_port = requested_port
+
+    PORT = actual_port
+
     if args.tunnel != "none":
         def _bg_tunnel():
-            time.sleep(1.5)
-            logger.info(f"🌐 Arka plan tüneli başlatılıyor ({args.tunnel})...")
+            time.sleep(1.0)
+            logger.info(f"🌐 Arka plan tüneli başlatılıyor ({args.tunnel} -> port {PORT})...")
             res = _start_tunnel(provider=args.tunnel)
             if res.get("auth_url"):
                 logger.info("=" * 65)
@@ -1260,24 +1281,6 @@ def main():
             elif res.get("error"):
                 logger.warning(f"Tunnel başlatılamadı: {res['error']}")
         threading.Thread(target=_bg_tunnel, daemon=True).start()
-
-    # Eğer port önceki oturumdan askıda kaldıysa temizle
-    try:
-        os.system(f"fuser -k {PORT}/tcp >/dev/null 2>&1 || true")
-        time.sleep(0.3)
-    except Exception:
-        pass
-
-    socketserver.TCPServer.allow_reuse_address = True
-    try:
-        server = http.server.ThreadingHTTPServer((args.host, PORT), StudioHandler)
-    except OSError as e:
-        if "Address already in use" in str(e) or getattr(e, "errno", None) == 98:
-            os.system(f"fuser -k {PORT}/tcp >/dev/null 2>&1 || true")
-            time.sleep(0.6)
-            server = http.server.ThreadingHTTPServer((args.host, PORT), StudioHandler)
-        else:
-            raise
 
     local_ips = get_local_ips()
     logger.info("=" * 65)
