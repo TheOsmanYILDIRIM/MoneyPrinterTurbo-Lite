@@ -1221,6 +1221,7 @@ def _start_tunnel(provider: str = "auto") -> dict:
 
 
 def main():
+    global PORT
     import argparse
     import threading
 
@@ -1236,8 +1237,8 @@ def main():
     if args.storage_dir:
         os.environ["STORAGE_DIR"] = os.path.abspath(args.storage_dir)
 
-    global PORT
-    PORT = args.port
+    requested_port = args.port
+    PORT = requested_port
 
     sys.path.insert(0, BASE_DIR)
 
@@ -1246,9 +1247,6 @@ def main():
 
     token = settings_manager.get_auth_token()
     worker.start_worker(auto_resume=args.auto_resume)
-
-    global PORT
-    requested_port = args.port
 
     server = None
     actual_port = requested_port
