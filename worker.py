@@ -6,7 +6,8 @@ from typing import Optional
 from loguru import logger
 
 import task_store
-from lite_engine import build_lecture_video, resolve_video_dimensions, TaskCancelled
+import settings_manager
+from lite_engine import build_lecture_video, resolve_video_dimensions, downgrade_video_to_480p, TaskCancelled
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -184,9 +185,31 @@ def _run_task(task_id: str):
         )
 
         file_size_mb = 0.0
+        video_480p_file = None
+        file_size_480p_mb = None
+        video_url_480p = None
+
         if os.path.exists(video_file):
             file_size_mb = round(os.path.getsize(video_file) / (1024 * 1024), 2)
-            # İsteğe bağlı olarak Drive/outputs klasörüne de kopyala / bağla
+
+            # 480p Düşük Boyutlu Kopya Oluşturma (Ayar veya görev bazlı)
+            save_480p = bool(task.get("save_480p", False) or settings_manager.get_setting("prod_save_480p", False))
+            if save_480p and resolution != "480p":
+                try:
+                    task_store.update_task(task_id, step_text="480p düşük boyutlu kopya oluşturuluyor...")
+                    w480, h480 = resolve_video_dimensions(aspect, "480p")
+                    out_480p_name = f"final_480p_{h480}p.mp4"
+                    out_480p_path = os.path.join(task_dir, out_480p_name)
+                    downgraded = downgrade_video_to_480p(video_file, out_480p_path, aspect=aspect, task_id=task_id)
+                    if downgraded and os.path.exists(downgraded):
+                        video_480p_file = downgraded
+                        file_size_480p_mb = round(os.path.getsize(downgraded) / (1024 * 1024), 2)
+                        video_url_480p = f"/tasks/{task_id}/{out_480p_name}"
+                        logger.info(f"Görev {task_id} için 480p kopya hazır: {video_480p_file} ({file_size_480p_mb} MB)")
+                except Exception as down_err:
+                    logger.warning(f"480p downgrade hatası ({task_id}): {down_err}")
+
+            # Drive/outputs klasörüne orijinal ve (varsa) 480p kopyaları kaydet
             storage_dir = task_store.get_storage_dir()
             outputs_dir = os.environ.get("OUTPUTS_DIR", os.path.join(storage_dir, "outputs"))
             try:
@@ -197,6 +220,11 @@ def _run_task(task_id: str):
                 out_copy_path = os.path.join(outputs_dir, out_copy_name)
                 import shutil
                 shutil.copy2(video_file, out_copy_path)
+
+                if video_480p_file and os.path.exists(video_480p_file):
+                    out_copy_480p_name = f"{clean_subject}_{task_id[:6]}_480p.mp4"
+                    out_copy_480p_path = os.path.join(outputs_dir, out_copy_480p_name)
+                    shutil.copy2(video_480p_file, out_copy_480p_path)
             except Exception as copy_err:
                 logger.debug(f"Outputs kopyalama atlandı: {copy_err}")
 
@@ -208,9 +236,12 @@ def _run_task(task_id: str):
             video_url=f"/tasks/{task_id}/{filename}",
             thumbnail_url=f"/tasks/{task_id}/thumb.jpg",
             file_path=video_file,
-            file_size_mb=file_size_mb
+            file_size_mb=file_size_mb,
+            video_url_480p=video_url_480p,
+            file_path_480p=video_480p_file,
+            file_size_480p_mb=file_size_480p_mb
         )
-        logger.success(f"Görev {task_id} tamamlandı: {video_file} ({file_size_mb} MB)")
+        logger.success(f"Görev {task_id} tamamlandı: {video_file} ({file_size_mb} MB){f' [480p: {file_size_480p_mb} MB]' if file_size_480p_mb else ''}")
     except TaskCancelled:
         task_store.update_task(
             task_id,

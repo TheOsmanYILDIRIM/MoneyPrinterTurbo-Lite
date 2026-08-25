@@ -172,8 +172,10 @@ def print_drive_status():
         for idx, t in enumerate(completed[:15], 1):
             subj = t.get("subject", "İsimsiz Ders")
             size = t.get("file_size_mb") or 0.0
+            size_480p = t.get("file_size_480p_mb")
+            extra_480p = f" | 480p: {size_480p} MB" if size_480p else ""
             dt = t.get("created_at_str") or ""
-            print(f"   {idx}. {subj} ({size} MB) - {dt}")
+            print(f"   {idx}. {subj} ({size} MB{extra_480p}) - {dt}")
         if len(completed) > 15:
             print(f"   ... ve {len(completed) - 15} adet daha video outputs klasöründe mevcut.")
 

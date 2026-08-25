@@ -62,14 +62,21 @@ def run_batch_pipeline(input_path: str = None, auto_resume: bool = True, wait_co
                     items=to_queue,
                     voice=s.get("prod_voice", "tr-TR-AhmetNeural"),
                     aspect=s.get("prod_aspect", "9:16"),
-                    resolution="720p",
+                    resolution=s.get("prod_resolution", "720p"),
+                    save_480p=s.get("prod_save_480p", False),
                     bg_style=s.get("prod_bg_style", "chalkboard"),
                     subtitle_enabled=s.get("prod_subtitle_enabled", True),
                     sub_color=s.get("prod_sub_color", "#FFFFFF"),
                     sub_pos=s.get("prod_sub_pos", "bottom"),
                     sub_size=s.get("prod_sub_size", 18),
                     sub_box=s.get("prod_sub_box", False),
-                    highlight_color=s.get("prod_highlight_color", "#FFD700")
+                    sub_bold=s.get("prod_sub_bold", True),
+                    sub_font=s.get("prod_sub_font", "Roboto"),
+                    outline_color=s.get("prod_outline_color", "#000000"),
+                    highlight_color=s.get("prod_highlight_color", "#FFD700"),
+                    bgm_mode=s.get("prod_bgm_mode", "none"),
+                    transition=s.get("prod_transition", "none"),
+                    transition_dur=float(s.get("prod_transition_dur", 0.5))
                 )
             else:
                 print("ℹ️ Eklenecek yeni ders bulunamadı (Tüm dersler daha önce işlenmiş veya kuyrukta).")

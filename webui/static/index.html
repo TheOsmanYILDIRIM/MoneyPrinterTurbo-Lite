@@ -141,6 +141,7 @@
             <div class="section-title" style="margin:0; font-size:1.05rem;">📁 Video Galerisi</div>
             <div class="flex-row" style="gap:8px; flex-wrap:wrap;">
                 <button class="btn-sm" id="btn-download-all-zip" style="background:#0284c722; color:#38bdf8; border:1px solid #0284c744; cursor:pointer;" title="Tamamlanmış tüm videoları tek bir ZIP olarak toplu indirir">📦 Tümünü ZIP İndir</button>
+                <button class="btn-sm" id="btn-download-all-480p-zip" style="background:#05966922; color:#34d399; border:1px solid #05966944; cursor:pointer;" title="Tamamlanmış tüm videoların 480p SD hafif kopyalarını tek bir ZIP olarak toplu indirir">📱 480p ZIP İndir</button>
                 <button class="btn-sm" id="btn-cancel-all" style="background:#f59e0b22; color:#fbbf24; border:1px solid #f59e0b44; cursor:pointer;" title="Kuyruktaki ve çalışan tüm görevleri durdurur">⏹️ Tümünü İptal Et</button>
                 <button class="btn-sm" id="btn-delete-all" style="background:#ef444422; color:#f87171; border:1px solid #ef444444; cursor:pointer;" title="Tüm görevleri ve üretilen videoları siler">🗑️ Tümünü Sil</button>
             </div>
@@ -203,6 +204,16 @@
                     <option value="4k">🔥 4K Ultra HD (2160p)</option>
                     <option value="480p">🚀 480p SD (Ultra Hızlı Taslak)</option>
                 </select>
+            </div>
+        </div>
+
+        <div class="grid-2 mt6">
+            <div>
+                <label for="prod_save_480p_chk">480p Düşük Boyutlu Kopya</label>
+                <label class="switch-row"><input type="checkbox" id="prod_save_480p_chk"> 🎬 480p Düşük Boyutlu Kopyayı da Sakla</label>
+            </div>
+            <div>
+                <p class="hint" style="margin-top:24px;">💡 Biten videonun 480p hafif kopyasını da arka planda oluşturup Drive/outputs klasörüne kaydeder.</p>
             </div>
         </div>
 

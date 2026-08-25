@@ -50,14 +50,20 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "prod_voice_rate": 1.0,
     "prod_voice_volume": 1.0,
     "prod_aspect": "9:16",
+    "prod_resolution": "720p",
+    "prod_save_480p": False,
     "prod_bg_style": "chalkboard",
     "prod_subtitle_enabled": True,
     "prod_sub_color": "#FFFFFF",
     "prod_sub_pos": "bottom",
     "prod_sub_size": 18,
     "prod_sub_box": False,
+    "prod_sub_bold": True,
+    "prod_sub_font": "Roboto",
+    "prod_outline_color": "#000000",
     "prod_highlight_color": "#FFD700",
     "prod_highlight_words": "",
+    "prod_highlight_size": 24,
     "prod_bgm_mode": "none",
     "prod_bgm_volume": 0.15,
     "prod_transition": "none",
@@ -99,7 +105,9 @@ def load_settings() -> Dict[str, Any]:
             except Exception:
                 data = {}
             res = DEFAULT_SETTINGS.copy()
-            res.update({k: v for k, v in data.items() if k in res})
+            if isinstance(data, dict):
+                # Mevcut tüm ayarları koru ve yeni varsayılanları ekle (geriye dönük tam uyum)
+                res.update(data)
             return res
 
 
@@ -107,8 +115,6 @@ def save_settings(new_settings: Dict[str, Any]) -> Dict[str, Any]:
     with _lock:
         current = load_settings()
         for key, value in new_settings.items():
-            if key not in current:
-                continue
             if isinstance(value, str):
                 value = value.strip()
                 if key in SECRET_KEYS and not value:

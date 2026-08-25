@@ -17,6 +17,7 @@ from urllib.parse import urlparse, parse_qs
 from loguru import logger
 
 import batch_engine
+import lite_engine
 import llm_service
 import settings_manager
 import task_store
@@ -219,6 +220,7 @@ def extract_task_params(fields: dict, files: dict) -> tuple[dict, str | None, st
     highlight_words = fields.get("highlight_words") or fields.get("sub_highlight_words") or prod.get("prod_highlight_words", "")
     raw_hl_size = fields.get("highlight_size") or fields.get("sub_highlight_size")
     highlight_size = int(raw_hl_size) if raw_hl_size else None
+    save_480p = str(_val("save_480p", "prod_save_480p", "false")).lower() in ("true", "1", "yes")
     bgm_source = fields.get("bgm_source") or prod.get("prod_bgm_mode", "none")
     bgm_volume = max(0.0, min(1.0, float(_val("bgm_volume", "prod_bgm_volume", 0.15) or 0.15)))
     transition = str(_val("transition", "prod_transition", "none")) or "none"
@@ -232,6 +234,7 @@ def extract_task_params(fields: dict, files: dict) -> tuple[dict, str | None, st
         "voice_volume": voice_volume,
         "aspect": aspect,
         "resolution": resolution,
+        "save_480p": save_480p,
         "bg_style": bg_style,
         "pexels_query": str(fields.get("pexels_query") or "").strip(),
         "subtitle_enabled": subtitle_enabled,
@@ -428,6 +431,8 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 if not task:
                     return self.send_json({"error": "Görev bulunamadı"}, 404)
                 return self.send_json({"logs": task.get("logs", [])})
+            if len(parts) >= 5 and parts[4] in ("download-480p", "downgrade-480p", "480p"):
+                return self._handle_download_480p(parts[3], parse_qs(parsed.query))
             task = task_store.get_task(parts[3])
             if not task:
                 return self.send_json({"error": "Görev bulunamadı"}, 404)
@@ -567,6 +572,10 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         if m:
             return self._handle_regenerate(m.group(1))
 
+        m = re.match(r"^/api/tasks/([\w\-]+)/downgrade-480p$", path)
+        if m:
+            return self._handle_download_480p(m.group(1), parse_qs(parsed.query), as_json=True)
+
         self.send_error(404, "Endpoint Not Found")
 
     def do_DELETE(self):
@@ -667,6 +676,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             aspect=fields.get("aspect") if fields.get("aspect") in ("9:16", "16:9", "1:1")
             else prod.get("prod_aspect", "9:16"),
             resolution=str(fields.get("resolution") or prod.get("prod_resolution", "720p")).strip().lower(),
+            save_480p=str(fields.get("save_480p") or prod.get("prod_save_480p", "false")).lower() in ("true", "1", "yes"),
             bg_style=fields.get("bg_style") or prod.get("prod_bg_style", "chalkboard"),
             subtitle_enabled=str(fields.get("subtitle_enabled") or prod.get("prod_subtitle_enabled", "true")).lower() in ("true", "1", "yes"),
             sub_color=fields.get("sub_color") or prod.get("prod_sub_color", "#FFFFFF"),
@@ -855,11 +865,73 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             return self.send_json({"error": "Önizleme üretilemedi"}, 500)
         return self._send_file_stream(preview_file)
 
+    def _handle_download_480p(self, task_id: str, qs: dict, as_json: bool = False):
+        """İstenen görevin 480p düşük boyutlu videosunu sunar; henüz oluşturulmamışsa anında üretir."""
+        task = task_store.get_task(task_id)
+        if not task or task.get("state") != "completed":
+            return self.send_json({"error": "Görev henüz tamamlanmadı veya bulunamadı."}, 404)
+
+        fp_480p = task.get("file_path_480p")
+        if not fp_480p or not os.path.isfile(fp_480p):
+            orig_fp = task.get("file_path")
+            if not orig_fp or not os.path.isfile(orig_fp):
+                return self.send_json({"error": "Orijinal video dosyası bulunamadı."}, 404)
+
+            tasks_base = task_store.get_tasks_dir()
+            task_dir = os.path.join(tasks_base, task_id)
+            aspect = task.get("aspect", "9:16")
+            w480, h480 = lite_engine.resolve_video_dimensions(aspect, "480p")
+            out_480p_name = f"final_480p_{h480}p.mp4"
+            out_480p_path = os.path.join(task_dir, out_480p_name)
+            downgraded = lite_engine.downgrade_video_to_480p(orig_fp, out_480p_path, aspect=aspect, task_id=task_id)
+            if not downgraded or not os.path.isfile(downgraded):
+                return self.send_json({"error": "480p dönüştürme işlemi gerçekleştirilemedi."}, 500)
+
+            fp_480p = downgraded
+            file_size_480p_mb = round(os.path.getsize(downgraded) / (1024 * 1024), 2)
+            video_url_480p = f"/tasks/{task_id}/{out_480p_name}"
+            task_store.update_task(
+                task_id,
+                file_path_480p=fp_480p,
+                video_url_480p=video_url_480p,
+                file_size_480p_mb=file_size_480p_mb
+            )
+
+            # Outputs klasörüne de kopyala
+            storage_dir = task_store.get_storage_dir()
+            outputs_dir = os.environ.get("OUTPUTS_DIR", os.path.join(storage_dir, "outputs"))
+            try:
+                os.makedirs(outputs_dir, exist_ok=True)
+                clean_subject = re.sub(r'[^\w\-_ ]+', '_', task.get("subject", "Ders"))[:40].strip()
+                out_copy_480p_path = os.path.join(outputs_dir, f"{clean_subject}_{task_id[:6]}_480p.mp4")
+                shutil.copy2(downgraded, out_copy_480p_path)
+            except Exception:
+                pass
+
+        if as_json:
+            return self.send_json({
+                "success": True,
+                "task_id": task_id,
+                "video_url_480p": task.get("video_url_480p") or f"/tasks/{task_id}/{os.path.basename(fp_480p)}",
+                "file_size_480p_mb": task.get("file_size_480p_mb") or round(os.path.getsize(fp_480p) / (1024 * 1024), 2)
+            })
+
+        dl_name = None
+        if qs.get("download"):
+            raw_name = sanitize_filename(qs["download"][0])
+            ext = ".mp4"
+            dl_name = (raw_name + ext) if not raw_name.endswith(ext) else raw_name
+        else:
+            raw_subj = sanitize_filename(task.get("subject", "ders_video")).replace(" ", "_")
+            dl_name = f"{raw_subj}_480p.mp4"
+        return self._send_file_stream(fp_480p, download_name=dl_name)
+
     def _handle_download_zip(self, qs: dict):
         """Toplu baslatma grubu, secili gorevler veya tum tamamlanmis videolari SIKISTIRMASIZ (ZIP_STORED) ZIP arsivi olarak sunar."""
         batch_id_param = (qs.get("batch_id") or [""])[0].strip()
         task_ids_param = (qs.get("task_ids") or [""])[0].strip()
         date_param = (qs.get("date") or [""])[0].strip()
+        quality_param = (qs.get("quality") or [""])[0].strip().lower()
         is_all = bool(qs.get("all") or date_param.lower() == "all" or (not batch_id_param and not task_ids_param and not date_param))
 
         target_task_ids = set([x.strip() for x in task_ids_param.split(",") if x.strip()]) if task_ids_param else set()
@@ -913,20 +985,21 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
 
         zip_id = uuid.uuid4().hex[:8]
         timestamp_tag = time.strftime("%Y%m%d_%H%M%S")
+        q_suffix = "_480p" if quality_param == "480p" else ""
 
         if batch_id_param:
             clean_bname = sanitize_filename(batch_id_param)
-            dl_display_name = f"MoneyPrinter_{clean_bname}.zip"
-            zip_filename = f"mpt_{clean_bname}_{zip_id}.zip"
+            dl_display_name = f"MoneyPrinter_{clean_bname}{q_suffix}.zip"
+            zip_filename = f"mpt_{clean_bname}{q_suffix}_{zip_id}.zip"
         elif is_all:
-            dl_display_name = f"MoneyPrinter_tum_videolar_{timestamp_tag}.zip"
-            zip_filename = f"mpt_tum_videolar_{timestamp_tag}_{zip_id}.zip"
+            dl_display_name = f"MoneyPrinter_tum_videolar{q_suffix}_{timestamp_tag}.zip"
+            zip_filename = f"mpt_tum_videolar{q_suffix}_{timestamp_tag}_{zip_id}.zip"
         elif target_task_ids:
-            dl_display_name = f"MoneyPrinter_secili_videolar_{timestamp_tag}.zip"
-            zip_filename = f"mpt_secili_{timestamp_tag}_{zip_id}.zip"
+            dl_display_name = f"MoneyPrinter_secili_videolar{q_suffix}_{timestamp_tag}.zip"
+            zip_filename = f"mpt_secili{q_suffix}_{timestamp_tag}_{zip_id}.zip"
         else:
-            dl_display_name = f"MoneyPrinter_videolar_{date_param or timestamp_tag}.zip"
-            zip_filename = f"mpt_videolar_{date_param or timestamp_tag}_{zip_id}.zip"
+            dl_display_name = f"MoneyPrinter_videolar{q_suffix}_{date_param or timestamp_tag}.zip"
+            zip_filename = f"mpt_videolar{q_suffix}_{date_param or timestamp_tag}_{zip_id}.zip"
 
         zip_path = os.path.join(temp_zip_dir, zip_filename)
 
@@ -939,18 +1012,49 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 b_idx = t.get("batch_index")
                 num_prefix = f"{b_idx:02d}_" if b_idx is not None else f"{idx:02d}_"
 
-                if not safe_title.lower().endswith(".mp4"):
-                    arcname = f"{num_prefix}{safe_title}.mp4"
-                else:
-                    arcname = f"{num_prefix}{safe_title}"
+                if quality_param == "480p":
+                    src_file = t.get("file_path_480p")
+                    if not src_file or not os.path.isfile(src_file):
+                        # İsteğe bağlı anında downgrade
+                        tasks_base = task_store.get_tasks_dir()
+                        task_dir = os.path.join(tasks_base, t.get("task_id", ""))
+                        aspect = t.get("aspect", "9:16")
+                        w480, h480 = lite_engine.resolve_video_dimensions(aspect, "480p")
+                        out_480p_name = f"final_480p_{h480}p.mp4"
+                        out_480p_path = os.path.join(task_dir, out_480p_name)
+                        downgraded = lite_engine.downgrade_video_to_480p(t["file_path"], out_480p_path, aspect=aspect)
+                        if downgraded and os.path.isfile(downgraded):
+                            src_file = downgraded
+                            task_store.update_task(
+                                t["task_id"],
+                                file_path_480p=downgraded,
+                                video_url_480p=f"/tasks/{t['task_id']}/{out_480p_name}",
+                                file_size_480p_mb=round(os.path.getsize(downgraded)/(1024*1024), 2)
+                            )
+                        else:
+                            src_file = t["file_path"]
 
-                base_arc, ext_arc = os.path.splitext(arcname)
-                counter = 1
-                while arcname in used_arcnames:
-                    arcname = f"{base_arc}_{counter}{ext_arc}"
-                    counter += 1
-                used_arcnames.add(arcname)
-                zf.write(t["file_path"], arcname=arcname)
+                    arcname = f"{num_prefix}{safe_title}_480p.mp4" if not safe_title.lower().endswith(".mp4") else f"{num_prefix}{safe_title[:-4]}_480p.mp4"
+                    base_arc, ext_arc = os.path.splitext(arcname)
+                    counter = 1
+                    while arcname in used_arcnames:
+                        arcname = f"{base_arc}_{counter}{ext_arc}"
+                        counter += 1
+                    used_arcnames.add(arcname)
+                    zf.write(src_file, arcname=arcname)
+                else:
+                    if not safe_title.lower().endswith(".mp4"):
+                        arcname = f"{num_prefix}{safe_title}.mp4"
+                    else:
+                        arcname = f"{num_prefix}{safe_title}"
+
+                    base_arc, ext_arc = os.path.splitext(arcname)
+                    counter = 1
+                    while arcname in used_arcnames:
+                        arcname = f"{base_arc}_{counter}{ext_arc}"
+                        counter += 1
+                    used_arcnames.add(arcname)
+                    zf.write(t["file_path"], arcname=arcname)
 
         return self._send_file_stream(zip_path, download_name=dl_display_name)
 

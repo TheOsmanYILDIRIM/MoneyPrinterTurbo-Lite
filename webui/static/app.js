@@ -555,6 +555,18 @@ function taskCard(t) {
         dl.href = t.video_url + "?download=" + encodeURIComponent(dlName);
         dl.setAttribute("download", dlName + ".mp4");
         actions.appendChild(dl);
+
+        const dl480 = make("a", "btn-sm",
+            t.file_size_480p_mb ? `📱 480p (${t.file_size_480p_mb} MB)` : `📱 480p`);
+        dl480.style.background = "#05966922";
+        dl480.style.color = "#34d399";
+        dl480.style.border = "1px solid #05966944";
+        dl480.style.cursor = "pointer";
+        dl480.title = "480p SD düşük boyutlu sürümü indir (oluşturulmamışsa hemen üretir)";
+        dl480.href = (t.video_url_480p ? t.video_url_480p : `/api/tasks/${t.task_id}/download-480p`) + "?download=" + encodeURIComponent(dlName + "_480p");
+        dl480.setAttribute("download", dlName + "_480p.mp4");
+        actions.appendChild(dl480);
+
         actions.appendChild(delBtn(t.task_id));
         card.appendChild(actions);
     }
@@ -674,7 +686,11 @@ function toggleDotsMenu(btn, t) {
     const items = [
         ["🎙️ Seslendirmeyi tekrar al", () => openVariantModal(t, "voice")],
         ["🎬 Görüntüyü tekrar bul", () => openVariantModal(t, "visuals")],
-        ["📝 Altyazıyı farklı yap", () => openVariantModal(t, "subtitles")]
+        ["📝 Altyazıyı farklı yap", () => openVariantModal(t, "subtitles")],
+        ["📱 480p Sürüm İndir / Üret", () => {
+            const dlName = (t.subject || "ders_video").replace(/[^\w\- ]+/g, "_").trim() || "ders_video";
+            window.location.href = (t.video_url_480p ? t.video_url_480p : `/api/tasks/${t.task_id}/download-480p`) + "?download=" + encodeURIComponent(dlName + "_480p");
+        }]
     ];
     items.forEach(([label, fn]) => {
         const b = make("button", null, label);
@@ -794,13 +810,15 @@ async function applyVariant() {
 
 let collapsedBatches = new Set();
 
-function downloadBatchZip(batchId) {
+function downloadBatchZip(batchId, quality = "") {
     if (!batchId) return;
-    window.location.href = `/api/tasks/download-zip?batch_id=${encodeURIComponent(batchId)}`;
+    const qParam = quality ? `&quality=${encodeURIComponent(quality)}` : "";
+    window.location.href = `/api/tasks/download-zip?batch_id=${encodeURIComponent(batchId)}${qParam}`;
 }
 
-function downloadAllVideosZip() {
-    window.location.href = `/api/tasks/download-zip?all=1`;
+function downloadAllVideosZip(quality = "") {
+    const qParam = quality ? `&quality=${encodeURIComponent(quality)}` : "";
+    window.location.href = `/api/tasks/download-zip?all=1${qParam}`;
 }
 
 async function deleteBatch(batchId) {
@@ -931,7 +949,7 @@ async function loadTasks() {
             const actionsDiv = make("div", "batch-actions");
             if (grp.completedCount > 0) {
                 const zipBtn = make("button", "btn-batch-zip");
-                zipBtn.innerHTML = `📦 ZIP İndir (${grp.completedCount})`;
+                zipBtn.innerHTML = `📦 ZIP (${grp.completedCount})`;
                 zipBtn.title = `Bu gruptaki ${grp.completedCount} tamamlanan videoyu sıkıştırmasız ZIP olarak indir`;
                 zipBtn.addEventListener("click", (e) => {
                     e.stopPropagation();
@@ -943,6 +961,23 @@ async function loadTasks() {
                     }
                 });
                 actionsDiv.appendChild(zipBtn);
+
+                const zip480Btn = make("button", "btn-batch-zip");
+                zip480Btn.innerHTML = `📱 480p ZIP`;
+                zip480Btn.style.background = "#05966922";
+                zip480Btn.style.color = "#34d399";
+                zip480Btn.style.borderColor = "#05966944";
+                zip480Btn.title = `Bu gruptaki ${grp.completedCount} tamamlanan videonun 480p SD kopyalarını ZIP olarak indir`;
+                zip480Btn.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    if (grp.isSingle) {
+                        const compIds = grp.tasks.filter(x => x.state === "completed").map(x => x.task_id).join(",");
+                        window.location.href = `/api/tasks/download-zip?quality=480p&task_ids=${encodeURIComponent(compIds)}`;
+                    } else {
+                        downloadBatchZip(grp.id, "480p");
+                    }
+                });
+                actionsDiv.appendChild(zip480Btn);
             }
 
             const delGrpBtn = make("button", "btn-batch-del", "🗑️");
@@ -1182,8 +1217,12 @@ async function loadSettings() {
     if (s.prod_voice_volume !== undefined) el("voice_volume").value = String(s.prod_voice_volume);
     if (s.prod_aspect) el("aspect").value = s.prod_aspect;
     if (s.prod_resolution) el("resolution").value = s.prod_resolution;
+    if (s.prod_save_480p !== undefined && el("prod_save_480p_chk")) el("prod_save_480p_chk").checked = !!s.prod_save_480p;
     if (s.prod_bg_style) el("bg_style").value = s.prod_bg_style;
     if (s.prod_subtitle_enabled !== undefined) el("subtitle_enabled_chk").checked = s.prod_subtitle_enabled;
+    if (s.prod_sub_bold !== undefined && el("sub_bold_chk")) el("sub_bold_chk").checked = !!s.prod_sub_bold;
+    if (s.prod_sub_font && el("sub_font")) el("sub_font").value = s.prod_sub_font;
+    if (s.prod_outline_color && el("outline_color")) el("outline_color").value = s.prod_outline_color;
     if (s.prod_sub_color) el("sub_color").value = s.prod_sub_color;
     if (s.prod_sub_pos) el("sub_pos").value = s.prod_sub_pos;
     if (s.prod_sub_size !== undefined) el("sub_size").value = String(s.prod_sub_size);
@@ -1220,8 +1259,12 @@ async function saveSettings() {
         prod_voice_volume: parseFloat(el("voice_volume").value || "1.0"),
         prod_aspect: el("aspect").value,
         prod_resolution: el("resolution") ? el("resolution").value : "720p",
+        prod_save_480p: el("prod_save_480p_chk") ? el("prod_save_480p_chk").checked : false,
         prod_bg_style: el("bg_style").value,
         prod_subtitle_enabled: el("subtitle_enabled_chk").checked,
+        prod_sub_bold: el("sub_bold_chk") ? el("sub_bold_chk").checked : true,
+        prod_sub_font: el("sub_font") ? el("sub_font").value : "Roboto",
+        prod_outline_color: el("outline_color") ? el("outline_color").value : "#000000",
         prod_sub_color: el("sub_color").value,
         prod_sub_pos: el("sub_pos").value,
         prod_sub_size: parseInt(el("sub_size").value || "18", 10),
@@ -1414,9 +1457,11 @@ function bindEvents() {
     const bDeleteAll = el("btn-delete-all");
     if (bDeleteAll) bDeleteAll.addEventListener("click", deleteAllTasks);
     const bDlAll = el("btn-download-all-zip");
-    if (bDlAll) bDlAll.addEventListener("click", downloadAllVideosZip);
+    if (bDlAll) bDlAll.addEventListener("click", () => downloadAllVideosZip());
+    const bDlAll480 = el("btn-download-all-480p-zip");
+    if (bDlAll480) bDlAll480.addEventListener("click", () => downloadAllVideosZip("480p"));
     const bDlDay = el("btn-download-day");
-    if (bDlDay) bDlDay.addEventListener("click", downloadAllVideosZip);
+    if (bDlDay) bDlDay.addEventListener("click", () => downloadAllVideosZip());
 
     // Toplu ses havuzu olayları
     const bVmodeDef = el("batch_vmode_default");

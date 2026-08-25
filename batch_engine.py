@@ -187,6 +187,7 @@ def create_batch_tasks(items: List[Dict[str, str]],
                        bgm_mode: str = "none",
                        transition: str = "none",
                        transition_dur: float = 0.5,
+                       save_480p: bool = False,
                        batch_id: Optional[str] = None) -> List[str]:
     """Her ders için kuyrukta bekleyen bir görev oluşturur ve worker'ı uyandırır."""
     import time
@@ -228,6 +229,7 @@ def create_batch_tasks(items: List[Dict[str, str]],
             voice=task_voice,
             aspect=norm.get("aspect", aspect),
             resolution=norm.get("resolution", resolution),
+            save_480p=bool(norm.get("save_480p", save_480p)),
             bg_style=norm.get("bg_style", bg_style),
             pexels_query=norm.get("pexels_query", ""),
             voice_rate=float(norm.get("voice_rate", voice_rate)),

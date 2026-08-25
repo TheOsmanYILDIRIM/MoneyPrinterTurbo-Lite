@@ -1191,3 +1191,62 @@ def build_lecture_video(
 
     notify(100, "Tamamlandı!")
     return final_output
+
+
+def downgrade_video_to_480p(
+    input_video_path: str,
+    output_video_path: Optional[str] = None,
+    aspect: str = "9:16",
+    task_id: Optional[str] = None
+) -> Optional[str]:
+    """
+    Bitmiş yüksek çözünürlüklü videoyu (720p/1080p/2K/4K) hızlıca 480p SD formatına düşürür.
+    Sesi yeniden encode etmeden doğrudan kopyalar (-c:a copy), GPU/CPU donanım hızlandırma kullanır.
+    """
+    if not input_video_path or not os.path.exists(input_video_path) or os.path.getsize(input_video_path) < 1024:
+        return None
+
+    if not output_video_path:
+        d = os.path.dirname(input_video_path) or "."
+        b = os.path.splitext(os.path.basename(input_video_path))[0]
+        output_video_path = os.path.join(d, f"{b}_480p.mp4")
+
+    w, h = resolve_video_dimensions(aspect, "480p")
+    ffmpeg_bin = get_ffmpeg_binary()
+    enc_conf = get_video_encoder_config()
+
+    if enc_conf.get("is_gpu"):
+        v_args = ["-c:v", "h264_nvenc", "-preset", "p1", "-cq", "26"]
+    else:
+        v_args = ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "26"]
+
+    cmd = [
+        ffmpeg_bin, "-y",
+        "-i", input_video_path,
+        "-vf", f"scale={w}:{h}",
+        *v_args,
+        "-c:a", "copy",
+        "-movflags", "+faststart",
+        output_video_path
+    ]
+
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if task_id:
+            _active_ffmpeg[f"{task_id}_480p"] = proc
+        stdout, stderr = proc.communicate(timeout=60)
+        if task_id:
+            _active_ffmpeg.pop(f"{task_id}_480p", None)
+
+        if proc.returncode == 0 and os.path.exists(output_video_path) and os.path.getsize(output_video_path) > 1024:
+            logger.info(f"480p downgrade tamamlandı: {output_video_path} ({round(os.path.getsize(output_video_path)/(1024*1024), 2)} MB)")
+            return output_video_path
+        else:
+            logger.warning(f"480p downgrade başarısız (rc={proc.returncode}): {stderr.decode('utf-8', errors='ignore')[-200:]}")
+            return None
+    except Exception as e:
+        logger.warning(f"480p downgrade işlemi sırasında hata: {e}")
+        if task_id:
+            _active_ffmpeg.pop(f"{task_id}_480p", None)
+        return None
+
