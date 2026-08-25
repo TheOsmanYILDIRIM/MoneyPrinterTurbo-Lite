@@ -209,21 +209,29 @@ def _run_task(task_id: str):
                 except Exception as down_err:
                     logger.warning(f"480p downgrade hatası ({task_id}): {down_err}")
 
-            # Drive/outputs klasörüne orijinal ve (varsa) 480p kopyaları kaydet
+            # Drive/outputs ve Drive/downgraded_outputs klasörlerine kopyala (toplu görevleri klasörle)
             storage_dir = task_store.get_storage_dir()
             outputs_dir = os.environ.get("OUTPUTS_DIR", os.path.join(storage_dir, "outputs"))
+            downgraded_dir = os.environ.get("DOWNGRADED_OUTPUTS_DIR", os.path.join(storage_dir, "downgraded_outputs"))
+            batch_id = task.get("batch_id")
             try:
-                os.makedirs(outputs_dir, exist_ok=True)
                 import re
-                clean_subject = re.sub(r'[^\w\-_ ]+', '_', subject)[:40].strip()
-                out_copy_name = f"{clean_subject}_{task_id[:6]}.mp4"
-                out_copy_path = os.path.join(outputs_dir, out_copy_name)
                 import shutil
+                clean_subject = re.sub(r'[^\w\-_ ]+', '_', subject)[:40].strip()
+
+                # HD/Orijinal video klasörleme
+                target_out_dir = os.path.join(outputs_dir, batch_id) if batch_id else outputs_dir
+                os.makedirs(target_out_dir, exist_ok=True)
+                out_copy_name = f"{clean_subject}_{task_id[:6]}.mp4"
+                out_copy_path = os.path.join(target_out_dir, out_copy_name)
                 shutil.copy2(video_file, out_copy_path)
 
+                # 480p video klasörleme (downgraded_outputs klasörüne)
                 if video_480p_file and os.path.exists(video_480p_file):
+                    target_down_dir = os.path.join(downgraded_dir, batch_id) if batch_id else downgraded_dir
+                    os.makedirs(target_down_dir, exist_ok=True)
                     out_copy_480p_name = f"{clean_subject}_{task_id[:6]}_480p.mp4"
-                    out_copy_480p_path = os.path.join(outputs_dir, out_copy_480p_name)
+                    out_copy_480p_path = os.path.join(target_down_dir, out_copy_480p_name)
                     shutil.copy2(video_480p_file, out_copy_480p_path)
             except Exception as copy_err:
                 logger.debug(f"Outputs kopyalama atlandı: {copy_err}")

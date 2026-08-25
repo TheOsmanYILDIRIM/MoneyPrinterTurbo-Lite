@@ -40,7 +40,9 @@ test_sub.srt
 
 # Runtime data & outputs
 output/
+storage
 storage/
+downgraded_outputs/
 .cache/
 
 # IDE & OS

@@ -33,33 +33,32 @@ def run_batch_pipeline(input_path: str = None, auto_resume: bool = True, wait_co
     # 2. Eğer yeni bir dosya veya klasör belirtilmişse kuyruğa ekle
     target_input = input_path or batch_dir
     if os.path.exists(target_input):
-        txt_files = glob.glob(os.path.join(target_input, "*.txt")) + glob.glob(os.path.join(target_input, "*.md")) if os.path.isdir(target_input) else [target_input]
-        new_items = []
+        txt_files = sorted(glob.glob(os.path.join(target_input, "*.txt")) + glob.glob(os.path.join(target_input, "*.md"))) if os.path.isdir(target_input) else [target_input]
+        total_queued_new = 0
         for tf in txt_files:
-            # Örnek dosyayı atla veya kullan
             items = batch_engine.parse_batch_input(tf)
-            if items:
-                new_items.extend(items)
-        
-        if new_items:
-            # Mevcut görevlerle mükerrer kontrolü (script veya subject eşleşmesi)
+            if not items:
+                continue
+
+            fname_stem = os.path.splitext(os.path.basename(tf))[0]
             existing_tasks = task_store.get_all_tasks()
             existing_subjects = {t.get("subject", "").strip().lower() for t in existing_tasks}
-            
+
             to_queue = []
-            for item in new_items:
+            for item in items:
                 subj = (item.get("subject") or "").strip().lower()
-                # Eğer daha önce tamamlanmış veya kuyrukta ise atla
                 if subj not in existing_subjects:
                     to_queue.append(item)
                 else:
                     logger.debug(f"Zaten mevcut, atlanıyor: {item.get('subject')}")
 
             if to_queue:
-                print(f"📥 {len(to_queue)} yeni ders görevi Google Drive kuyruğuna ekleniyor...")
+                batch_id = f"batch_{time.strftime('%Y%m%d_%H%M%S')}_{fname_stem}"
+                print(f"📥 [{fname_stem}] {len(to_queue)} yeni ders görevi kuyruğa ekleniyor (Grup Klasörü: {batch_id})...")
                 s = settings_manager.load_settings()
                 batch_engine.create_batch_tasks(
                     items=to_queue,
+                    batch_id=batch_id,
                     voice=s.get("prod_voice", "tr-TR-AhmetNeural"),
                     aspect=s.get("prod_aspect", "9:16"),
                     resolution=s.get("prod_resolution", "720p"),
@@ -78,8 +77,10 @@ def run_batch_pipeline(input_path: str = None, auto_resume: bool = True, wait_co
                     transition=s.get("prod_transition", "none"),
                     transition_dur=float(s.get("prod_transition_dur", 0.5))
                 )
-            else:
-                print("ℹ️ Eklenecek yeni ders bulunamadı (Tüm dersler daha önce işlenmiş veya kuyrukta).")
+                total_queued_new += len(to_queue)
+
+        if total_queued_new == 0 and txt_files:
+            print("ℹ️ Eklenecek yeni ders bulunamadı (Tüm dersler daha önce işlenmiş veya kuyrukta).")
 
     # 3. Worker'ı başlat
     worker.start_worker(auto_resume=True)

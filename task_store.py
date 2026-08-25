@@ -24,9 +24,16 @@ def get_tasks_dir() -> str:
     return path
 
 
+def get_downgraded_outputs_dir() -> str:
+    path = os.environ.get("DOWNGRADED_OUTPUTS_DIR", os.path.join(get_storage_dir(), "downgraded_outputs"))
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
 STORAGE_DIR = get_storage_dir()
 DB_FILE = get_db_file()
 TASKS_DIR = get_tasks_dir()
+DOWNGRADED_OUTPUTS_DIR = get_downgraded_outputs_dir()
 _lock = threading.RLock()
 
 ACTIVE_STATES = ("queued", "processing")
@@ -213,29 +220,43 @@ def delete_task(task_id: str) -> bool:
         task_data = tasks.pop(task_id)
         _save_db(tasks)
 
-    # 1. Görev çalışma klasörünü ve video dosyasını sil
+    # 1. Görev çalışma klasörünü ve video dosyalarını sil
     file_path = task_data.get("file_path")
     if file_path and os.path.exists(file_path):
         try:
             os.remove(file_path)
         except Exception:
             pass
-    shutil.rmtree(os.path.join(get_tasks_dir(), task_id), ignore_errors=True)
-
-    # 2. Google Drive outputs klasöründeki kopyayı da sil
-    storage_dir = get_storage_dir()
-    outputs_dir = os.environ.get("OUTPUTS_DIR", os.path.join(storage_dir, "outputs"))
-    if os.path.isdir(outputs_dir):
+    file_path_480p = task_data.get("file_path_480p")
+    if file_path_480p and os.path.exists(file_path_480p):
         try:
-            for f in os.listdir(outputs_dir):
-                if task_id[:6] in f:
-                    fp = os.path.join(outputs_dir, f)
-                    try:
-                        os.remove(fp)
-                    except Exception:
-                        pass
+            os.remove(file_path_480p)
         except Exception:
             pass
+    shutil.rmtree(os.path.join(get_tasks_dir(), task_id), ignore_errors=True)
+
+    # 2. Google Drive outputs ve downgraded_outputs klasörlerindeki kopyaları da sil
+    storage_dir = get_storage_dir()
+    outputs_dir = os.environ.get("OUTPUTS_DIR", os.path.join(storage_dir, "outputs"))
+    downgraded_dir = os.environ.get("DOWNGRADED_OUTPUTS_DIR", os.path.join(storage_dir, "downgraded_outputs"))
+
+    for base_dir in (outputs_dir, downgraded_dir):
+        if os.path.isdir(base_dir):
+            for root, dirs, files in os.walk(base_dir):
+                for f in files:
+                    if task_id[:6] in f or task_id in f:
+                        fp = os.path.join(root, f)
+                        try:
+                            os.remove(fp)
+                        except Exception:
+                            pass
+            # Boş kalan alt klasörleri temizle
+            for root, dirs, files in os.walk(base_dir, topdown=False):
+                if root != base_dir and not os.listdir(root):
+                    try:
+                        os.rmdir(root)
+                    except Exception:
+                        pass
 
     return True
 
@@ -247,32 +268,41 @@ def delete_all_tasks() -> int:
     for tid in task_ids:
         delete_task(tid)
 
-    # outputs klasörünü tamamen temizle
+    # outputs ve downgraded_outputs klasörlerini tamamen temizle
     storage_dir = get_storage_dir()
-    outputs_dir = os.environ.get("OUTPUTS_DIR", os.path.join(storage_dir, "outputs"))
-    if os.path.isdir(outputs_dir):
-        try:
-            for f in os.listdir(outputs_dir):
-                fp = os.path.join(outputs_dir, f)
-                if os.path.isfile(fp):
-                    try:
-                        os.remove(fp)
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+    for env_var, default_name in (("OUTPUTS_DIR", "outputs"), ("DOWNGRADED_OUTPUTS_DIR", "downgraded_outputs")):
+        base_dir = os.environ.get(env_var, os.path.join(storage_dir, default_name))
+        if os.path.isdir(base_dir):
+            for item in os.listdir(base_dir):
+                ip = os.path.join(base_dir, item)
+                try:
+                    if os.path.isdir(ip):
+                        shutil.rmtree(ip, ignore_errors=True)
+                    else:
+                        os.remove(ip)
+                except Exception:
+                    pass
 
     return len(task_ids)
 
 
 def delete_batch(batch_id: str) -> int:
-    """Belirli bir batch_id'ye ait tüm görevleri ve dosyalarını siler."""
+    """Belirli bir batch_id'ye ait tüm görevleri ve klasörlerini siler."""
     with _lock:
         tasks = _load_db()
         matching_ids = [tid for tid, t in tasks.items() if t.get("batch_id") == batch_id]
         for tid in matching_ids:
             delete_task(tid)
-        return len(matching_ids)
+
+    # outputs ve downgraded_outputs altındaki batch klasörlerini de sil
+    storage_dir = get_storage_dir()
+    for env_var, default_name in (("OUTPUTS_DIR", "outputs"), ("DOWNGRADED_OUTPUTS_DIR", "downgraded_outputs")):
+        base_dir = os.environ.get(env_var, os.path.join(storage_dir, default_name))
+        b_path = os.path.join(base_dir, batch_id)
+        if os.path.isdir(b_path):
+            shutil.rmtree(b_path, ignore_errors=True)
+
+    return len(matching_ids)
 
 
 def get_tasks_by_batch(batch_id: str) -> List[dict]:

@@ -552,6 +552,11 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             deleted = worker.cancel_and_delete_all()
             return self.send_json({"success": True, "count": deleted})
 
+        if path == "/api/drive/organize":
+            import drive_sync
+            stats = drive_sync.organize_drive()
+            return self.send_json({"success": True, "stats": stats})
+
         m = re.match(r"^/api/tasks/([\w\-]+)/resume$", path)
         if m:
             task_id = m.group(1)
@@ -897,13 +902,15 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 file_size_480p_mb=file_size_480p_mb
             )
 
-            # Outputs klasörüne de kopyala
+            # downgraded_outputs klasörüne de kopyala (toplu görevleri klasörle)
             storage_dir = task_store.get_storage_dir()
-            outputs_dir = os.environ.get("OUTPUTS_DIR", os.path.join(storage_dir, "outputs"))
+            downgraded_dir = os.environ.get("DOWNGRADED_OUTPUTS_DIR", os.path.join(storage_dir, "downgraded_outputs"))
+            batch_id = task.get("batch_id")
             try:
-                os.makedirs(outputs_dir, exist_ok=True)
+                target_down_dir = os.path.join(downgraded_dir, batch_id) if batch_id else downgraded_dir
+                os.makedirs(target_down_dir, exist_ok=True)
                 clean_subject = re.sub(r'[^\w\-_ ]+', '_', task.get("subject", "Ders"))[:40].strip()
-                out_copy_480p_path = os.path.join(outputs_dir, f"{clean_subject}_{task_id[:6]}_480p.mp4")
+                out_copy_480p_path = os.path.join(target_down_dir, f"{clean_subject}_{task_id[:6]}_480p.mp4")
                 shutil.copy2(downgraded, out_copy_480p_path)
             except Exception:
                 pass
