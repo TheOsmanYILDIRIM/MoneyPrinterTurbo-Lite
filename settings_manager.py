@@ -9,6 +9,11 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def get_storage_dir() -> str:
     path = os.environ.get("STORAGE_DIR", os.path.join(BASE_DIR, "storage"))
+    if os.path.islink(path) and not os.path.exists(path):
+        try:
+            os.unlink(path)
+        except Exception:
+            pass
     os.makedirs(path, exist_ok=True)
     return path
 

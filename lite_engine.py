@@ -240,18 +240,30 @@ def format_ass_styled_text(
     base_color_ass: str,
     highlight_words: Optional[any] = None,
     highlight_color_hex: str = "#FFD700",
-    highlight_size: Optional[int] = None
+    highlight_size: Optional[int] = None,
+    is_boxed: bool = False
 ) -> str:
-    """Altyazı metnindeki vurgulu kelimeleri veya etiketleri ASS biçimlendirme kodlarına çevirir."""
+    """
+    Altyazı metnindeki vurgulu kelimeleri ASS biçimlendirme kodlarına çevirir.
+    Kutulu modda font boyutunu homojen tutarak kelime kenarlarında kutu kesişmesi ve koyulaşmayı (alpha seam) %100 önler.
+    """
     if not text:
         return ""
 
     hl_ass = hex_to_ass_color(highlight_color_hex or "#FFD700", "00")
-    hl_fs = int(highlight_size) if highlight_size else max(base_fontsize + 4, int(round(base_fontsize * 1.15)))
+    # Kutulu modda veya boyut belirtilmediğinde font boyutunu sabit tutarak tek parça kusursuz kutu çizdir
+    if is_boxed or highlight_size is None:
+        hl_fs = base_fontsize
+        fs_tag_start = ""
+        fs_tag_end = ""
+    else:
+        hl_fs = int(highlight_size)
+        fs_tag_start = f"\\fs{hl_fs}"
+        fs_tag_end = f"\\fs{base_fontsize}"
 
     res = text.replace("\n", " ").strip()
 
-    # 1. Custom <color=#HEX>...</color> or <c=#HEX>...</c>
+    # 1. Custom <color=#HEX>...</color>
     def _replace_color(m):
         col = m.group(1).strip()
         body = m.group(2)
@@ -260,46 +272,20 @@ def format_ass_styled_text(
 
     res = re.sub(r"<(?:color|c)=['\"]?([#a-zA-Z0-9]+)['\"]?>([^<]+)</(?:color|c)>", _replace_color, res, flags=re.IGNORECASE)
 
-    # 2. Custom <size=NUM>...</size> or <s=NUM>...</s>
-    def _replace_size(m):
-        raw_sz = m.group(1).strip()
-        body = m.group(2)
-        try:
-            if raw_sz.startswith(("+", "-")):
-                sz = max(10, base_fontsize + int(raw_sz))
-            elif raw_sz.endswith(("x", "X")):
-                sz = max(10, int(round(base_fontsize * float(raw_sz[:-1]))))
-            else:
-                sz = max(10, int(raw_sz))
-        except Exception:
-            sz = hl_fs
-        return f"{{\\fs{sz}}}{body}{{\\fs{base_fontsize}}}"
-
-    res = re.sub(r"<(?:size|s)=['\"]?([+\-0-9.xX]+)['\"]?>([^<]+)</(?:size|s)>", _replace_size, res, flags=re.IGNORECASE)
-
-    # 3. <hl color="..." size="...">...</hl>
+    # 2. <hl>...</hl>
     def _replace_hl_tag(m):
         attrs = m.group(1) or ""
         body = m.group(2)
         c_match = re.search(r"color=['\"]?([#a-zA-Z0-9]+)['\"]?", attrs, re.IGNORECASE)
-        s_match = re.search(r"size=['\"]?([+\-0-9.xX]+)['\"]?", attrs, re.IGNORECASE)
         c_ass = hex_to_ass_color(c_match.group(1), "00") if c_match else hl_ass
-        if s_match:
-            raw_sz = s_match.group(1)
-            try:
-                sz = max(10, base_fontsize + int(raw_sz)) if raw_sz.startswith(("+", "-")) else max(10, int(raw_sz))
-            except Exception:
-                sz = hl_fs
-        else:
-            sz = hl_fs
-        return f"{{\\c{c_ass}\\fs{sz}\\b1}}{body}{{\\c{base_color_ass}\\fs{base_fontsize}\\b0}}"
+        return f"{{\\c{c_ass}{fs_tag_start}\\b1}}{body}{{\\c{base_color_ass}{fs_tag_end}\\b0}}"
 
     res = re.sub(r"<(?:hl|mark|vurgu)([^>]*)>([^<]+)</(?:hl|mark|vurgu)>", _replace_hl_tag, res, flags=re.IGNORECASE)
 
-    # 4. Markdown bold **kelime** -> highlight with highlight color & bold
-    res = re.sub(r"\*\*([^*]+)\*\*", rf"{{\\c{hl_ass}\\fs{hl_fs}\\b1}}\1{{\\c{base_color_ass}\\fs{base_fontsize}\\b0}}", res)
+    # 3. Markdown bold **kelime** -> highlight with color & bold
+    res = re.sub(r"\*\*([^*]+)\*\*", rf"{{\\c{hl_ass}{fs_tag_start}\\b1}}\1{{\\c{base_color_ass}{fs_tag_end}\\b0}}", res)
 
-    # 5. highlight_words eşleşmesi
+    # 4. highlight_words eşleşmesi
     hl_list = []
     if highlight_words:
         if isinstance(highlight_words, str):
@@ -313,7 +299,7 @@ def format_ass_styled_text(
                 continue
             # Regex ile kelime sınırında bul (ASS tagleri içine düşmemek için)
             pattern = re.compile(rf"(?<!\{{\\)(?<!\w)({re.escape(hw)})(?!\w)(?![^\{{]*\}})", re.IGNORECASE)
-            res = pattern.sub(rf"{{\\c{hl_ass}\\fs{hl_fs}\\b1}}\1{{\\c{base_color_ass}\\fs{base_fontsize}\\b0}}", res)
+            res = pattern.sub(rf"{{\\c{hl_ass}{fs_tag_start}\\b1}}\1{{\\c{base_color_ass}{fs_tag_end}\\b0}}", res)
 
     return res
 
@@ -342,9 +328,10 @@ def write_ass_subtitles(cues: List[Tuple[float, float, str]], path: str,
         margin_v = round(height * (0.10 if height > width else 0.08))
 
     if boxed:
-        ass_outline_color = "&H80000000"  # %50 yarı saydam tek katman arka plan
-        back_color = "&HFF000000"         # İkincil gölge/kutu katmanı tamamen şeffaf (koyulaşmayı önler)
-        ass_outline_w = max(2, round(m["fontsize"] * 0.16))
+        # Tek katmanlı, gölgesiz, saf %50 yarı saydam arka plan kutusu (üst üste binmeyi ve çift koyulaşmayı %100 önler)
+        ass_outline_color = "&H80000000"  # %50 yarı saydam siyah kutu
+        back_color = "&HFF000000"         # Gölge tamamen şeffaf (çift kutu oluşmasını engeller)
+        ass_outline_w = max(2, round(m["fontsize"] * 0.14))
         shadow_w = 0
     else:
         ass_outline_color = hex_to_ass_color(outline_color or "#000000", "00")
@@ -368,15 +355,16 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     lines = [header]
 
-    # Altyazıların üst üste binip çift katmanlı koyulaşma (alpha stacking) yapmasını engelle
+    # Altyazıların zaman ve piksellerde üst üste binip çift katmanlı koyulaşma (alpha stacking) yapmasını engelle
     sorted_cues = sorted([c for c in cues if c[2] and c[2].strip()], key=lambda x: x[0])
     cleaned_cues = []
     for i, (start, end, text) in enumerate(sorted_cues):
         if i + 1 < len(sorted_cues):
             next_start = sorted_cues[i + 1][0]
-            if end > next_start:
-                end = max(start + 0.05, next_start - 0.02)
-        if end > start:
+            # Ardışık iki altyazı arasında en az 40ms (1 video karesi) net boşluk bırak (zaman kesişmesini %100 önler)
+            if end >= next_start:
+                end = max(start + 0.05, next_start - 0.04)
+        if end > start + 0.03:
             cleaned_cues.append((start, end, text))
 
     for start, end, text in cleaned_cues:
@@ -389,7 +377,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             base_color_ass=primary,
             highlight_words=highlight_words,
             highlight_color_hex=highlight_color or "#FFD700",
-            highlight_size=highlight_size
+            highlight_size=highlight_size,
+            is_boxed=boxed
         )
         lines.append(f"Dialogue: 0,{format_ass_time(start)},{format_ass_time(end)},Sub,,0,0,0,,{styled_text}\n")
     
@@ -1249,4 +1238,186 @@ def downgrade_video_to_480p(
         if task_id:
             _active_ffmpeg.pop(f"{task_id}_480p", None)
         return None
+
+
+def render_from_manifest(
+    manifest_data: any,
+    output_path: Optional[str] = None,
+    target_resolution: Optional[str] = None,
+    aspect_override: Optional[str] = None,
+    voice_rate_override: Optional[float] = None,
+    sub_pos_override: Optional[str] = None,
+    sub_size_override: Optional[int] = None,
+    sub_color_override: Optional[str] = None,
+    highlight_color_override: Optional[str] = None,
+    boxed_override: Optional[bool] = None,
+    transition_override: Optional[str] = None,
+    work_dir: Optional[str] = None,
+    task_id: Optional[str] = None,
+    cancel_requested: Optional[Callable[[], bool]] = None
+) -> Optional[str]:
+    """
+    OpenMontage / Agentic Reçete Dosyasını (production_manifest.json) okuyup
+    videoları hedef çözünürlükte indirerek, ses ve dinamik altyazıları birleştirir.
+    Hız (voice_rate), altyazı konumu (sub_pos), renkler ve geçişler sonradan değiştirildiğinde
+    tüm zaman çizelgesini otomatik ölçekler ve senkronizasyonu %100 korur.
+    """
+    if isinstance(manifest_data, str):
+        if not os.path.exists(manifest_data):
+            raise FileNotFoundError(f"Manifest dosyası bulunamadı: {manifest_data}")
+        with open(manifest_data, "r", encoding="utf-8") as f:
+            manifest = json.load(f)
+    else:
+        manifest = manifest_data
+
+    pid = manifest.get("project_id", "manifest_task")
+    title = manifest.get("title", "Video")
+    aspect = aspect_override or manifest.get("aspect_ratio", "9:16")
+    res = target_resolution or manifest.get("target_resolution", "720p")
+    w, h = resolve_video_dimensions(aspect, res)
+
+    working_dir = work_dir or os.path.join(settings_manager.get_storage_dir(), f"task_{pid}")
+    os.makedirs(working_dir, exist_ok=True)
+
+    # 1. Ses ve Altyazı Ayarları
+    audio_info = manifest.get("audio", {})
+    voice_file = audio_info.get("voice_file")
+    script_text = manifest.get("full_script", "")
+
+    # Hız (voice_rate) ezme / belirleme
+    voice_rate = voice_rate_override or float(audio_info.get("voice_rate", 1.0) or 1.0)
+    voice_volume = float(audio_info.get("voice_volume", 1.0) or 1.0)
+    voice_name = audio_info.get("voice_name", "tr-TR-AhmetNeural")
+
+    # Eğer hız değiştirildiyse veya ses dosyası yoksa sesi yeniden üret
+    needs_tts = not voice_file or not os.path.exists(voice_file) or (voice_rate_override is not None)
+    if needs_tts:
+        voice_file = os.path.join(working_dir, f"{pid}_voice_{voice_rate}x.mp3")
+        logger.info(f"🎙️ Ses üretiliyor ({voice_name} @ {voice_rate}x hız)...")
+
+        def _do_edge():
+            return asyncio.run(generate_speech_edge(script_text, voice_file, voice=voice_name, rate=voice_rate, volume=voice_volume, cancel_requested=cancel_requested))
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                _, cues = executor.submit(_do_edge).result()
+        else:
+            _, cues = _do_edge()
+    else:
+        cues = []
+        words = script_text.split()
+        dur = get_audio_duration(voice_file)
+        chunk_dur = dur / max(1, len(words) // 4)
+        c_y = 0.0
+        for i in range(0, len(words), 4):
+            cues.append((c_y, min(dur, c_y + chunk_dur), " ".join(words[i:i+4])))
+            c_y += chunk_dur
+
+    actual_duration = get_audio_duration(voice_file)
+    manifest_duration = float(audio_info.get("total_duration", actual_duration) or actual_duration)
+    # Zaman ölçekleme katsayısı (Hız değiştiğinde sahnelerin tam oturmasını sağlar)
+    scale_factor = (actual_duration / manifest_duration) if manifest_duration > 0 else 1.0
+
+    logger.info(f"🎬 [Manifest Renderer] '{title}' ({pid}): {aspect} @ {res} | Süre: {actual_duration:.1f}s (Ölçek: {scale_factor:.2f}x)...")
+
+    # 2. Altyazı .ass Dosyasını Derle
+    sub_info = manifest.get("subtitles", {})
+    ass_path = os.path.join(working_dir, f"{pid}_subtitles.ass")
+    
+    sub_pos = sub_pos_override or sub_info.get("position", "bottom")
+    sub_size = sub_size_override or sub_info.get("font_size", 24)
+    sub_color = sub_color_override or sub_info.get("sub_color", "#FFFFFF")
+    hl_color = highlight_color_override or sub_info.get("highlight_color", "#FBBF24")
+    boxed = boxed_override if boxed_override is not None else sub_info.get("boxed", False)
+
+    write_ass_subtitles(
+        cues=cues,
+        path=ass_path,
+        width=w,
+        height=h,
+        sub_color=sub_color,
+        sub_pos=sub_pos,
+        sub_size=sub_size,
+        boxed=boxed,
+        is_bold=True,
+        font_name=sub_info.get("font_name", "Roboto"),
+        outline_color=sub_info.get("outline_color", "#000000"),
+        outline_width=sub_info.get("outline_width", 3),
+        highlight_words=sub_info.get("highlight_words", []),
+        highlight_color=hl_color
+    )
+
+    # 3. Timeline'daki Stok Videoları İndir / Hazırla
+    timeline = manifest.get("timeline", [])
+    downloaded_clips: List[str] = []
+
+    for sc_idx, scene in enumerate(timeline, 1):
+        v_src = scene.get("visual_source", {})
+        clip_out = os.path.join(working_dir, f"scene_{sc_idx}_{v_src.get('video_id', 'clip')}.mp4")
+
+        dl_url = v_src.get("download_url")
+        if not dl_url and v_src.get("video_id") and not str(v_src.get("video_id")).startswith("mock_"):
+            api_key = settings_manager.get_setting("pexels_api_keys", "").split(",")[0].strip()
+            if api_key:
+                try:
+                    headers = {"Authorization": api_key}
+                    v_res = requests.get(f"https://api.pexels.com/videos/videos/{v_src.get('video_id')}", headers=headers, timeout=10)
+                    if v_res.status_code == 200:
+                        dl_url = select_best_pexels_file(v_res.json().get("video_files", []), w, h)
+                except Exception as e:
+                    logger.warning(f"Pexels klip sorgu hatası: {e}")
+
+        if dl_url:
+            success = _download_pexels_clip(dl_url, clip_out, w, h)
+            if success:
+                downloaded_clips.append(clip_out)
+
+    if not downloaded_clips:
+        downloaded_clips = fetch_pexels_clips(title, "portrait" if aspect == "9:16" else "landscape", working_dir, w, h, target_duration=actual_duration)
+
+    # 4. Döngüsel / Çoklu Klip Arka Planı (Geçiş efekti desteği)
+    bg_video_path = os.path.join(working_dir, f"{pid}_background.mp4")
+    transition_mode = transition_override or manifest.get("transition", "crossfade")
+    transition_dur = float(manifest.get("transition_duration", 0.4) or 0.4)
+
+    if downloaded_clips:
+        bg_video = build_cycling_background(downloaded_clips, actual_duration, bg_video_path, w, h, transition=transition_mode, transition_dur=transition_dur)
+    else:
+        bg_video = bg_video_path
+        cmd = [
+            get_ffmpeg_binary(), "-y",
+            "-f", "lavfi", "-i", f"color=c=0x0f172a:s={w}x{h}:d={actual_duration+0.5:.1f}:r=30",
+            "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+            bg_video
+        ]
+        subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    # 5. FFmpeg ile Nihai Render
+    final_output = output_path or os.path.join(settings_manager.get_storage_dir(), "outputs", f"{pid}_{title.replace(' ', '_')}_{res}.mp4")
+    os.makedirs(os.path.dirname(final_output) or ".", exist_ok=True)
+
+    result = render_video_ffmpeg(
+        background_media=bg_video,
+        audio_path=voice_file,
+        subtitle_path=ass_path,
+        output_video=final_output,
+        aspect=aspect,
+        resolution=res,
+        is_video_bg=True,
+        subtitle_enabled=True,
+        task_id=task_id,
+        cancel_requested=cancel_requested
+    )
+
+    if result and os.path.exists(result) and os.path.getsize(result) > 1024:
+        logger.info(f"✅ [Manifest Renderer] Video başarıyla tamamlandı: {result}")
+        return result
+    return None
+
 

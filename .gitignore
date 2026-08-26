@@ -44,6 +44,8 @@ storage
 storage/
 downgraded_outputs/
 .cache/
+agent/samples/
+agent/experiments/
 
 # IDE & OS
 .idea/
